@@ -1,0 +1,31 @@
+name: Import Trakt source
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone Trakt main
+        run: |
+          git clone --depth 1 https://github.com/trakt/trakt-android.git /tmp/trakt
+          echo "Imported from https://github.com/trakt/trakt-android" > TRAKT_SOURCE.txt
+          echo "Commit: $(git -C /tmp/trakt rev-parse HEAD)" >> TRAKT_SOURCE.txt
+          echo "License: GPL-3.0 (see LICENSE)" >> TRAKT_SOURCE.txt
+          rm -rf /tmp/trakt/.git
+
+      - name: Copy into this repo
+        run: |
+          # keep our own .github (workflows) and README; Trakt's workflows would only fail here
+          rsync -a --exclude='.github' --exclude='README.md' /tmp/trakt/ ./
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Import Trakt Android source (reference base)" || echo "Nothing to commit"
+          git push

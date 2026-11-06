@@ -1,0 +1,1593 @@
+
+
+===== TOP LEVEL =====
+AGENTS.md
+CLAUDE.md
+Gemfile
+Gemfile.lock
+LICENSE
+README.md
+TRAKT_SOURCE.txt
+app
+build.gradle.kts
+buildSrc
+common
+external
+fastlane
+gradle
+gradle.properties
+gradlew
+gradlew.bat
+openapi
+remote-config
+repo-map.txt
+resources
+scripts
+settings.gradle.kts
+tv
+
+
+===== SETTINGS (modules) =====
+import java.net.URI
+
+pluginManagement {
+    repositories {
+        google {
+            content {
+                includeGroupByRegex("com\\.android.*")
+                includeGroupByRegex("com\\.google.*")
+                includeGroupByRegex("androidx.*")
+            }
+        }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        maven { url = rootProject.projectDir.resolve("./external/younify").toURI() }
+        maven { url = URI("https://jitpack.io") }
+    }
+}
+
+rootProject.name = "Trakt"
+include(":app")
+include(":tv")
+include(":common")
+include(":resources")
+
+
+===== ROOT build.gradle.kts =====
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+plugins {
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.android.library) apply false
+    alias(libs.plugins.kotlin.compose) apply false
+    alias(libs.plugins.google.services) apply false
+    alias(libs.plugins.openapi.generator)
+}
+
+openApiGenerate {
+    inputSpec.set("$rootDir/openapi/openapi.json")
+    generatorName = "kotlin"
+    validateSpec = true
+    cleanupOutput = true
+    generateApiTests = false
+    generateModelTests = false
+    typeMappings = mapOf(
+        "number+int64" to "kotlin.Long",
+    )
+    configOptions = mapOf(
+        "library" to "jvm-ktor",
+        "dateLibrary" to "kotlinx-datetime",
+        "serializationLibrary" to "kotlinx_serialization",
+        "sortModelPropertiesByRequiredFlag" to "true",
+        "sortParamsByRequiredFlag" to "true",
+        "enumPropertyNaming" to "UPPERCASE",
+    )
+}
+
+// Remove double ()() artifacts
+tasks.register<ReplaceInFilesTask>("removeArtifacts") {
+    group = "Custom"
+    description = "Remove double ()() artifacts from generated code"
+    sourceDir.set(file("build/generate-resources/main/src"))
+    targetString.set("()()")
+    replacementString.set("()")
+}
+
+// Workaround https://github.com/OpenAPITools/openapi-generator/issues/18904
+tasks.register<ReplaceInFilesTask>("dedupeSerializable") {
+    group = "Custom"
+    description = "Replaces occurrences of @Serializable interface in source files " +
+        "to work around the bug described at https://github.com/OpenAPITools/openapi-generator/issues/18904"
+
+    sourceDir.set(file("build/generate-resources/main/src"))
+    targetString.set("@Serializable\n\ninterface")
+    replacementString.set("interface")
+}
+
+// Make APiClient HttpClient public
+tasks.register<ReplaceInFilesTask>("publicApiClient") {
+    group = "Custom"
+    description = "Makes ApiClient class and its HttpClient property public"
+
+    sourceDir.set(file("build/generate-resources/main/src"))
+    targetString.set("private val client: HttpClient by lazy")
+    replacementString.set("val client: HttpClient by lazy")
+}
+
+// Remove unused gender param for people
+tasks.register<ReplaceInFilesTask>("removeGenders") {
+    group = "Custom"
+    description = "Makes ApiClient class and its HttpClient property public"
+
+    sourceDir.set(file("build/generate-resources/main/src"))
+    targetString.set(
+        "@SerialName(value = \"gender\")\n" +
+            "    val gender: kotlin.String? = null,"
+    )
+    replacementString.set("")
+}
+
+abstract class ReplaceInFilesTask : DefaultTask() {
+    @get:InputDirectory
+    abstract val sourceDir: DirectoryProperty
+
+    @get:Input
+    abstract val targetString: Property<String>
+
+    @get:Input
+    abstract val replacementString: Property<String>
+
+    @TaskAction
+    fun replaceStrings() {
+        val target = targetString.get()
+        val replacement = replacementString.get()
+        val sourceDir = sourceDir.get().asFile
+
+        if (sourceDir.exists()) {
+            sourceDir.walkTopDown()
+                .filter { it.isFile }
+                .forEach { file ->
+                    val content = file.readText()
+                    val newContent = content.replace(target, replacement)
+                    if (content != newContent) {
+                        file.writeText(newContent)
+                        println("Replaced in: ${file.absolutePath}")
+                    }
+                }
+        } else {
+            println("Source directory does not exist: $sourceDir")
+        }
+    }
+}
+
+tasks.getByName("openApiGenerate")
+    .finalizedBy(
+        "dedupeSerializable",
+        "publicApiClient",
+        "removeGenders",
+        "removeArtifacts"
+    )
+
+
+===== gradle.properties =====
+# Project-wide Gradle settings.
+# IDE (e.g. Android Studio) users:
+# Gradle settings configured through the IDE *will override*
+# any settings specified in this file.
+# For more details on how to configure your build environment visit
+# http://www.gradle.org/docs/current/userguide/build_environment.html
+# Specifies the JVM arguments used for the daemon process.
+# The setting is particularly useful for tweaking memory settings.
+org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8
+kotlin.daemon.jvmargs=-Xmx3g
+# When configured, Gradle will run in incubating parallel mode.
+# This option should only be used with decoupled projects. For more details, visit
+# https://developer.android.com/r/tools/gradle-multi-project-decoupled-projects
+# org.gradle.parallel=true
+# AndroidX package structure to make it clearer which packages are bundled with the
+# Android operating system, and which are packaged with your app's APK
+# https://developer.android.com/topic/libraries/support-library/androidx-rn
+android.useAndroidX=true
+# Kotlin code style for this project: "official" or "obsolete":
+kotlin.code.style=official
+# Enables namespacing of each library's R class so that its R class includes only the
+# resources declared in the library itself and none from the library's dependencies,
+# thereby reducing the size of the R class for that library
+android.nonTransitiveRClass=true
+android.uniquePackageNames=false
+android.dependency.useConstraints=true
+android.r8.strictFullModeForKeepRules=false
+android.generateSyncIssueWhenLibraryConstraintsAreEnabled=false
+
+
+===== VERSION CATALOG (head) =====
+[versions]
+versionCode = "451"
+versionName = "3.27.0"
+
+minSdk = "28"
+compileSdk = "37"
+targetSdk = "37"
+
+# Libraries
+
+activityCompose = "1.13.0"
+agp = "9.5.0"
+androidxLifecycle = "2.11.0"
+androidxFoundation = "1.12.1"
+appcompat = "1.8.0"
+browser = "1.10.0"
+billing = "9.1.0"
+coil = "3.6.3"
+composeBom = "2026.09.00"
+composeNavigation = "2.10.2"
+coreKtx = "1.19.1"
+datastore = "1.3.0"
+firebaseBom = "35.1.0"
+firebaseCrashlytics = "3.0.8"
+flagkit = "1.0.5"
+googleServices = "4.5.0"
+immutableCollections = "0.5.2"
+inAppReview = "2.0.2"
+inAppUpdate = "2.1.0"
+crossDevicePrompt = "0.0.1"
+koinBom = "4.2.2"
+kotlin = "2.4.21"
+kotlinx-datetime = "0.8.0"
+kotlinxSerialization = "1.12.0"
+ktor = "3.6.1"
+material = "1.14.0"
+material3 = "1.5.0-beta02"
+material3Adaptive = "1.3.0"
+openapi = "7.26.0"
+media3 = "1.11.1"
+phoenix = "3.0.0"
+qr = "1.0.1"
+timber = "5.0.1"
+tvFoundation = "1.0.0"
+tvMaterial = "1.1.0"
+workManager = "2.12.0"
+youtube-player = "13.0.0"
+younify = "1.0.3"
+glance = "1.3.0-alpha02"
+mlkitGenaiPrompt = "1.0.0-beta5"
+mlkitTranslate = "17.0.3"
+coroutinesPlayServices = "1.11.0"
+
+# Testing Libraries
+
+junit = "4.13.2"
+junitVersion = "1.3.0"
+espressoCore = "3.7.0"
+
+[libraries]
+android-material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+android-billing = { group = "com.android.billingclient", name = "billing-ktx", version.ref = "billing" }
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+androidx-browser = { group = "androidx.browser", name = "browser", version.ref = "browser" }
+androidx-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "androidxFoundation" }
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3" }
+androidx-compose-material3-adaptive = { group = "androidx.compose.material3.adaptive", name = "adaptive", version.ref = "material3Adaptive" }
+androidx-compose-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
+androidx-compose-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
+androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
+androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
+androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
+androidx-lifecycle-process = { group = "androidx.lifecycle", name = "lifecycle-process", version.ref = "androidxLifecycle" }
+androidx-lifecycle-runtime = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "androidxLifecycle" }
+androidx-work = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workManager" }
+
+androidx-tv-foundation = { group = "androidx.tv", name = "tv-foundation", version.ref = "tvFoundation" }
+androidx-tv-material = { group = "androidx.tv", name = "tv-material", version.ref = "tvMaterial" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+androidx-navigation = { group = "androidx.navigation", name = "navigation-compose", version.ref = "composeNavigation" }
+androidx-datastore = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
+androidx-app-review = { group = "com.google.android.play", name = "review-ktx", version.ref = "inAppReview" }
+androidx-app-update = { group = "com.google.android.play", name = "app-update-ktx", version.ref = "inAppUpdate" }
+androidx-cross-device-prompt = { group = "com.google.android.play", name = "crossdeviceprompt", version.ref = "crossDevicePrompt" }
+
+androidx-media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
+androidx-media3-ui-compose-m3 = { group = "androidx.media3", name = "media3-ui-compose-material3", version.ref = "media3" }
+androidx-media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
+androidx-media3-common = { group = "androidx.media3", name = "media3-common-ktx", version.ref = "media3" }
+
+androidx-glance-appwidget = { group = "androidx.glance", name = "glance-appwidget", version.ref = "glance" }
+androidx-glance-appwidget-preview = { group = "androidx.glance", name = "glance-appwidget-preview", version.ref = "glance" }
+androidx-glance-material3 = { group = "androidx.glance", name = "glance-material3", version.ref = "glance" }
+androidx-glance-preview = { group = "androidx.glance", name = "glance-preview", version.ref = "glance" }
+
+coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
+coil-gif = { group = "io.coil-kt.coil3", name = "coil-gif", version.ref = "coil" }
+coil-network = { group = "io.coil-kt.coil3", name = "coil-network-ktor3", version.ref = "coil" }
+coil-svg = { group = "io.coil-kt.coil3", name = "coil-svg", version.ref = "coil" }
+
+kotlin-immutable-collections = { group = "org.jetbrains.kotlinx", name = "kotlinx-collections-immutable", version.ref = "immutableCollections" }
+kotlinx-datetime = { group = "org.jetbrains.kotlinx", name = "kotlinx-datetime", version.ref = "kotlinx-datetime" }
+kotlinx-serialization-proto = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-protobuf", version.ref = "kotlinxSerialization" }
+
+qr-compose = { group = "com.lightspark", name = "compose-qr-code", version.ref = "qr" }
+youtube-player = { group = "com.pierfrancescosoffritti.androidyoutubeplayer", name = "core", version.ref = "youtube-player" }
+youtube-player-ui = { group = "com.pierfrancescosoffritti.androidyoutubeplayer", name = "custom-ui", version.ref = "youtube-player" }
+flagkit = { module = "com.github.murgupluoglu:flagkit-android", version.ref = "flagkit" }
+timber = { group = "com.jakewharton.timber", name = "timber", version.ref = "timber" }
+phoenix = { group = "com.jakewharton", name = "process-phoenix", version.ref = "phoenix" }
+younify = { module = "tv.younify.sdk:connect", version.ref = "younify" }
+
+ktor-client-core = { group = "io.ktor", name = "ktor-client-core", version.ref = "ktor" }
+ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }
+ktor-client-serialization = { group = "io.ktor", name = "ktor-serialization-kotlinx-json", version.ref = "ktor" }
+ktor-client-negotiation = { group = "io.ktor", name = "ktor-client-content-negotiation", version.ref = "ktor" }
+ktor-client-auth = { group = "io.ktor", name = "ktor-client-auth", version.ref = "ktor" }
+ktor-client-logger = { group = "io.ktor", name = "ktor-client-logging", version.ref = "ktor" }
+
+koin-bom = { module = "io.insert-koin:koin-bom", version.ref = "koinBom" }
+koin-core = { module = "io.insert-koin:koin-core" }
+koin-android-compose = { module = "io.insert-koin:koin-androidx-compose" }
+koin-android-work = { module = "io.insert-koin:koin-androidx-workmanager" }
+
+firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
+firebase-config = { group = "com.google.firebase", name = "firebase-config" }
+firebase-analytics = { group = "com.google.firebase", name = "firebase-analytics" }
+firebase-crashlytics = { group = "com.google.firebase", name = "firebase-crashlytics" }
+
+mlkit-genai-prompt = { group = "com.google.mlkit", name = "genai-prompt", version.ref = "mlkitGenaiPrompt" }
+mlkit-translate = { group = "com.google.mlkit", name = "translate", version.ref = "mlkitTranslate" }
+kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutinesPlayServices" }
+
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+
+[bundles]
+androidx-media3 = [
+    "androidx-media3-exoplayer",
+    "androidx-media3-ui-compose-m3",
+    "androidx-media3-ui",
+    "androidx-media3-common"
+]
+
+[plugins]
+google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+openapi-generator = { id = "org.openapi.generator", version.ref = "openapi" }
+firebase-crashlytics = { id = "com.google.firebase.crashlytics", version.ref = "firebaseCrashlytics" }
+
+
+===== app/build.gradle.kts =====
+import com.android.build.gradle.internal.cxx.configure.gradleLocalProperties
+import java.util.Properties
+
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.google.services)
+    alias(libs.plugins.firebase.crashlytics)
+}
+
+private val localProperties = gradleLocalProperties(rootDir, providers)
+private val resourcesProperties = Properties().apply {
+    load(file("src/main/res/resources.properties").inputStream())
+}
+
+private val supportedLocales = resourcesProperties.getProperty("supportedLocales", "")
+    .split(",")
+    .map { it.trim() }
+    .filter { it.isNotEmpty() }
+
+private val supportedLocalesBuildConfig = supportedLocales
+    .joinToString(prefix = "{", postfix = "}") { "\"$it\"" }
+
+android {
+    namespace = "tv.trakt.trakt"
+    compileSdk = libs.versions.compileSdk.get().toInt()
+
+    defaultConfig {
+        applicationId = "tv.trakt.trakt"
+        manifestPlaceholders["applicationName"] = "Trakt"
+
+        minSdk = libs.versions.minSdk.get().toInt()
+        targetSdk = libs.versions.targetSdk.get().toInt()
+
+        versionCode = libs.versions.versionCode.get().toInt()
+        versionName = libs.versions.versionName.get()
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "TRAKT_API_KEY", localProperties.getProperty("TRAKT_API_KEY"))
+        buildConfigField("String", "YOUNIFY_API_KEY", localProperties.getProperty("YOUNIFY_API_KEY"))
+        buildConfigField("int", "VERSION_CODE", versionCode.toString())
+        buildConfigField("String", "VERSION_NAME", "\"${versionName}\"")
+        buildConfigField("String[]", "SUPPORTED_LOCALES", supportedLocalesBuildConfig)
+
+        ndk {
+            debugSymbolLevel = "SYMBOL_TABLE"
+            providers.gradleProperty("abiFilters").orNull?.let { filters ->
+                abiFilters += filters.split(",").map(String::trim)
+            }
+        }
+    }
+
+    signingConfigs {
+        val keystoreFile = rootProject.file("keystore.jks")
+        val keystorePassword: String = localProperties.getProperty("KEYSTORE_PASSWORD")
+        val keystoreAlias: String = localProperties.getProperty("KEYSTORE_ALIAS")
+        val keystoreKeyPassword: String = localProperties.getProperty("KEYSTORE_KEY_PASSWORD")
+
+        create("release") {
+            storeFile = keystoreFile
+            storePassword = keystorePassword
+            keyAlias = keystoreAlias
+            keyPassword = keystoreKeyPassword
+        }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            isMinifyEnabled = false
+        }
+        getByName("release") {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+
+    flavorDimensions += "version"
+    productFlavors {
+        create("playstore") {
+            dimension = "version"
+        }
+        create("internal") {
+            dimension = "version"
+            applicationIdSuffix = ".v3"
+            manifestPlaceholders["applicationName"] = "Trakt Internal"
+        }
+    }
+
+    buildFeatures {
+        buildConfig = true
+        compose = true
+    }
+
+    androidResources {
+        generateLocaleConfig = true
+    }
+
+    kotlin {
+        jvmToolchain(11)
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+}
+
+dependencies {
+    implementation(project(":resources"))
+    implementation(project(":common"))
+    implementation(project(":tv"))
+
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.browser)
+    implementation(libs.androidx.foundation)
+    implementation(libs.android.material)
+    implementation(libs.androidx.navigation)
+    implementation(libs.androidx.datastore)
+    implementation(libs.androidx.work)
+    implementation(libs.android.billing)
+    implementation(libs.androidx.lifecycle.process)
+    implementation(libs.androidx.app.review)
+    implementation(libs.androidx.app.update)
+    implementation(libs.androidx.cross.device.prompt)
+    implementation(libs.androidx.glance.appwidget)
+    implementation(libs.androidx.glance.appwidget.preview)
+    implementation(libs.androidx.glance.material3)
+    implementation(libs.androidx.glance.preview)
+
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.config)
+    implementation(libs.firebase.analytics)
+    implementation(libs.firebase.crashlytics)
+
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.okhttp)
+    implementation(libs.ktor.client.logger)
+    implementation(libs.ktor.client.serialization)
+    implementation(libs.ktor.client.negotiation)
+    implementation(libs.ktor.client.auth)
+
+    implementation(project.dependencies.platform(libs.koin.bom))
+    implementation(libs.koin.core)
+    implementation(libs.koin.android.compose)
+    implementation(libs.koin.android.work)
+
+    // Android Compose
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material3.adaptive)
+    implementation(libs.androidx.compose.tooling.preview)
+    debugImplementation(libs.androidx.compose.tooling)
+
+    implementation(libs.kotlinx.serialization.proto)
+    implementation(libs.kotlin.immutable.collections)
+    implementation(libs.timber)
+    implementation(libs.phoenix)
+    implementation(libs.younify)
+    implementation(libs.mlkit.genai.prompt)
+    implementation(libs.mlkit.translate)
+    implementation(libs.kotlinx.coroutines.play.services)
+
+    // Testing
+
+    testImplementation(libs.junit)
+
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+}
+
+// Custom Tasks
+
+// Execute the task immediately during Gradle sync
+afterEvaluate {
+    val versionCode = libs.versions.versionCode.get()
+    val changelogDir = file("${rootProject.projectDir}/fastlane/metadata/android/en-US/changelogs")
+    val expectedFileName = "$versionCode.txt"
+    val expectedFile = File(changelogDir, expectedFileName)
+
+    if (!changelogDir.exists()) {
+        changelogDir.mkdirs()
+    }
+
+    val existingFiles = changelogDir.listFiles { file ->
+        file.extension == "txt" && file.name != "default.txt"
+    }
+
+    if (existingFiles != null && existingFiles.isNotEmpty()) {
+        val existingFile = existingFiles.first()
+        if (existingFile.name != expectedFileName) {
+            existingFile.renameTo(expectedFile)
+            // Add renamed file to git
+
+        }
+        existingFiles.drop(1).forEach { it.delete() }
+    } else if (!expectedFile.exists()) {
+        expectedFile.writeText("This update includes general improvements that make Trakt faster, smoother, and more reliable. Enjoy!\n")
+    }
+
+    Runtime.getRuntime().exec(arrayOf("git", "add", expectedFile.absolutePath), null, rootProject.projectDir)
+}
+
+
+
+===== tv/build.gradle.kts =====
+import com.android.build.gradle.internal.cxx.configure.gradleLocalProperties
+
+plugins {
+    alias(libs.plugins.android.library)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
+}
+
+private val localProperties = gradleLocalProperties(rootDir, providers)
+
+android {
+    namespace = "tv.trakt.trakt.app"
+    compileSdk = libs.versions.compileSdk.get().toInt()
+
+    defaultConfig {
+        minSdk = libs.versions.minSdk.get().toInt()
+
+        buildConfigField("String", "TRAKT_API_KEY", localProperties.getProperty("TRAKT_API_KEY"))
+
+        buildConfigField("int", "VERSION_CODE", libs.versions.versionCode.get())
+        buildConfigField("String", "VERSION_NAME", "\"${libs.versions.versionName.get()}\"")
+    }
+
+    flavorDimensions += "version"
+    productFlavors {
+        create("playstore") {
+            dimension = "version"
+        }
+        create("internal") {
+            dimension = "version"
+        }
+    }
+
+    kotlin {
+        jvmToolchain(11)
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
+}
+
+dependencies {
+    implementation(project(":common"))
+    implementation(project(":resources"))
+
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.graphics)
+    implementation(libs.androidx.compose.tooling.preview)
+    implementation(libs.androidx.tv.foundation)
+    implementation(libs.androidx.tv.material)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.lifecycle.runtime)
+    implementation(libs.androidx.lifecycle.process)
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.navigation)
+    implementation(libs.androidx.datastore)
+    implementation(libs.androidx.app.review)
+    implementation(libs.bundles.androidx.media3)
+    implementation(libs.androidx.work)
+
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.config)
+    implementation(libs.firebase.analytics)
+    implementation(libs.firebase.crashlytics)
+
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.okhttp)
+    implementation(libs.ktor.client.logger)
+    implementation(libs.ktor.client.serialization)
+    implementation(libs.ktor.client.negotiation)
+    implementation(libs.ktor.client.auth)
+
+    implementation(project.dependencies.platform(libs.koin.bom))
+    implementation(libs.koin.core)
+    implementation(libs.koin.android.compose)
+    implementation(libs.koin.android.work)
+
+    implementation(libs.kotlin.immutable.collections)
+    implementation(libs.kotlinx.serialization.proto)
+    implementation(libs.kotlinx.datetime)
+    implementation(libs.qr.compose)
+
+    implementation(libs.flagkit)
+    implementation(libs.timber)
+
+    debugImplementation(libs.androidx.compose.tooling)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
+}
+
+
+===== JDK / SDK hints =====
+app/build.gradle.kts:27:    compileSdk = libs.versions.compileSdk.get().toInt()
+app/build.gradle.kts:33:        minSdk = libs.versions.minSdk.get().toInt()
+app/build.gradle.kts:34:        targetSdk = libs.versions.targetSdk.get().toInt()
+app/build.gradle.kts:103:        jvmToolchain(11)
+app/build.gradle.kts:107:        sourceCompatibility = JavaVersion.VERSION_11
+app/build.gradle.kts:108:        targetCompatibility = JavaVersion.VERSION_11
+common/build.gradle.kts:13:    compileSdk = libs.versions.compileSdk.get().toInt()
+common/build.gradle.kts:16:        minSdk = libs.versions.minSdk.get().toInt()
+common/build.gradle.kts:52:        jvmToolchain(11)
+common/build.gradle.kts:56:        sourceCompatibility = JavaVersion.VERSION_11
+common/build.gradle.kts:57:        targetCompatibility = JavaVersion.VERSION_11
+resources/build.gradle.kts:7:    compileSdk = libs.versions.compileSdk.get().toInt()
+resources/build.gradle.kts:10:        minSdk = libs.versions.minSdk.get().toInt()
+resources/build.gradle.kts:40:        jvmToolchain(11)
+resources/build.gradle.kts:44:        sourceCompatibility = JavaVersion.VERSION_11
+resources/build.gradle.kts:45:        targetCompatibility = JavaVersion.VERSION_11
+tv/build.gradle.kts:13:    compileSdk = libs.versions.compileSdk.get().toInt()
+tv/build.gradle.kts:16:        minSdk = libs.versions.minSdk.get().toInt()
+tv/build.gradle.kts:35:        jvmToolchain(11)
+tv/build.gradle.kts:39:        sourceCompatibility = JavaVersion.VERSION_11
+tv/build.gradle.kts:40:        targetCompatibility = JavaVersion.VERSION_11
+
+
+===== SOURCE DIRECTORIES (file counts) =====
+      3 .
+      1 .claude
+      1 app
+      1 app/src/androidTest/java/tv/trakt/trakt
+      2 app/src/main/java/tv/trakt/trakt
+      4 app/src/main/java/tv/trakt/trakt/core/applinks
+      1 app/src/main/java/tv/trakt/trakt/core/applinks/di
+      3 app/src/main/java/tv/trakt/trakt/core/applinks/model
+      3 app/src/main/java/tv/trakt/trakt/core/applinks/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/auth
+      1 app/src/main/java/tv/trakt/trakt/core/auth/di
+      3 app/src/main/java/tv/trakt/trakt/core/auth/model
+      1 app/src/main/java/tv/trakt/trakt/core/auth/usecase
+      3 app/src/main/java/tv/trakt/trakt/core/billing
+      1 app/src/main/java/tv/trakt/trakt/core/billing/di
+      6 app/src/main/java/tv/trakt/trakt/core/billing/model
+      1 app/src/main/java/tv/trakt/trakt/core/billing/navigation
+      1 app/src/main/java/tv/trakt/trakt/core/billing/ui
+      2 app/src/main/java/tv/trakt/trakt/core/billing/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/calendar/di
+      3 app/src/main/java/tv/trakt/trakt/core/calendar/feature/monthly
+      1 app/src/main/java/tv/trakt/trakt/core/calendar/feature/monthly/data
+      2 app/src/main/java/tv/trakt/trakt/core/calendar/feature/monthly/sheets
+      3 app/src/main/java/tv/trakt/trakt/core/calendar/feature/monthly/ui
+      1 app/src/main/java/tv/trakt/trakt/core/calendar/feature/monthly/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/calendar/feature/weekly
+      1 app/src/main/java/tv/trakt/trakt/core/calendar/feature/weekly/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/calendar/model
+      1 app/src/main/java/tv/trakt/trakt/core/calendar/navigation
+      7 app/src/main/java/tv/trakt/trakt/core/calendar/ui
+      3 app/src/main/java/tv/trakt/trakt/core/calendar/ui/context
+      1 app/src/main/java/tv/trakt/trakt/core/calendar/ui/context/sheet
+      1 app/src/main/java/tv/trakt/trakt/core/calendar/ui/controls
+      5 app/src/main/java/tv/trakt/trakt/core/calendar/usecases
+      2 app/src/main/java/tv/trakt/trakt/core/checkin/data
+      2 app/src/main/java/tv/trakt/trakt/core/checkin/data/service
+      1 app/src/main/java/tv/trakt/trakt/core/checkin/di
+      1 app/src/main/java/tv/trakt/trakt/core/checkin/model
+      1 app/src/main/java/tv/trakt/trakt/core/checkin/ui
+      3 app/src/main/java/tv/trakt/trakt/core/comments
+      1 app/src/main/java/tv/trakt/trakt/core/comments/di
+      4 app/src/main/java/tv/trakt/trakt/core/comments/features/deletecomment
+      4 app/src/main/java/tv/trakt/trakt/core/comments/features/details
+      4 app/src/main/java/tv/trakt/trakt/core/comments/features/editcomment
+      4 app/src/main/java/tv/trakt/trakt/core/comments/features/postcomment
+      4 app/src/main/java/tv/trakt/trakt/core/comments/features/postreply
+      4 app/src/main/java/tv/trakt/trakt/core/comments/features/translation/data
+      3 app/src/main/java/tv/trakt/trakt/core/comments/features/translation/download
+      1 app/src/main/java/tv/trakt/trakt/core/comments/features/translation/model
+      2 app/src/main/java/tv/trakt/trakt/core/comments/features/translation/ui
+      1 app/src/main/java/tv/trakt/trakt/core/comments/helpers
+      4 app/src/main/java/tv/trakt/trakt/core/comments/model
+      1 app/src/main/java/tv/trakt/trakt/core/comments/navigation
+      8 app/src/main/java/tv/trakt/trakt/core/comments/ui
+     12 app/src/main/java/tv/trakt/trakt/core/comments/ui/richtext
+      7 app/src/main/java/tv/trakt/trakt/core/comments/usecases
+      4 app/src/main/java/tv/trakt/trakt/core/discover
+      1 app/src/main/java/tv/trakt/trakt/core/discover/data/local/media
+      1 app/src/main/java/tv/trakt/trakt/core/discover/di
+      1 app/src/main/java/tv/trakt/trakt/core/discover/navigation
+      3 app/src/main/java/tv/trakt/trakt/core/discover/sections/all
+      1 app/src/main/java/tv/trakt/trakt/core/discover/sections/all/navigation
+      2 app/src/main/java/tv/trakt/trakt/core/discover/sections/all/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/discover/sections/anticipated
+      2 app/src/main/java/tv/trakt/trakt/core/discover/sections/anticipated/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/discover/sections/anticipated/usecases/movies
+      1 app/src/main/java/tv/trakt/trakt/core/discover/sections/anticipated/usecases/shows
+      3 app/src/main/java/tv/trakt/trakt/core/discover/sections/popular
+      2 app/src/main/java/tv/trakt/trakt/core/discover/sections/popular/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/discover/sections/popular/usecases/movies
+      1 app/src/main/java/tv/trakt/trakt/core/discover/sections/popular/usecases/shows
+      3 app/src/main/java/tv/trakt/trakt/core/discover/sections/releases
+      1 app/src/main/java/tv/trakt/trakt/core/discover/sections/releases/model
+      1 app/src/main/java/tv/trakt/trakt/core/discover/sections/releases/usecases
+      2 app/src/main/java/tv/trakt/trakt/core/discover/sections/releases/usecases/movies
+      2 app/src/main/java/tv/trakt/trakt/core/discover/sections/releases/usecases/shows
+      2 app/src/main/java/tv/trakt/trakt/core/discover/sections/releases/views
+      3 app/src/main/java/tv/trakt/trakt/core/discover/sections/trending
+      2 app/src/main/java/tv/trakt/trakt/core/discover/sections/trending/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/discover/sections/trending/usecases/movies
+      1 app/src/main/java/tv/trakt/trakt/core/discover/sections/trending/usecases/shows
+      1 app/src/main/java/tv/trakt/trakt/core/discover/ui
+      1 app/src/main/java/tv/trakt/trakt/core/discover/usecases
+      2 app/src/main/java/tv/trakt/trakt/core/episodes/ui
+      5 app/src/main/java/tv/trakt/trakt/core/filters
+      2 app/src/main/java/tv/trakt/trakt/core/filters/data
+      1 app/src/main/java/tv/trakt/trakt/core/filters/di
+      1 app/src/main/java/tv/trakt/trakt/core/filters/navigation
+      3 app/src/main/java/tv/trakt/trakt/core/filters/views
+      2 app/src/main/java/tv/trakt/trakt/core/filters/views/dropdowns
+      4 app/src/main/java/tv/trakt/trakt/core/home
+      1 app/src/main/java/tv/trakt/trakt/core/home/di
+      1 app/src/main/java/tv/trakt/trakt/core/home/navigation
+      1 app/src/main/java/tv/trakt/trakt/core/home/sections/activity/data/local/personal
+      1 app/src/main/java/tv/trakt/trakt/core/home/sections/activity/features/all
+      1 app/src/main/java/tv/trakt/trakt/core/home/sections/activity/features/all/navigation
+      2 app/src/main/java/tv/trakt/trakt/core/home/sections/activity/features/all/personal
+      2 app/src/main/java/tv/trakt/trakt/core/home/sections/activity/features/all/social
+      4 app/src/main/java/tv/trakt/trakt/core/home/sections/activity/features/all/views
+      3 app/src/main/java/tv/trakt/trakt/core/home/sections/activity/features/history
+      3 app/src/main/java/tv/trakt/trakt/core/home/sections/activity/features/social
+      1 app/src/main/java/tv/trakt/trakt/core/home/sections/activity/sheets
+      3 app/src/main/java/tv/trakt/trakt/core/home/sections/activity/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/home/sections/activity/views
+      3 app/src/main/java/tv/trakt/trakt/core/home/sections/activity/views/context
+      1 app/src/main/java/tv/trakt/trakt/core/home/sections/monthreview
+      1 app/src/main/java/tv/trakt/trakt/core/home/sections/monthreview/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/home/sections/recommended
+      1 app/src/main/java/tv/trakt/trakt/core/home/sections/recommended/data/media
+      4 app/src/main/java/tv/trakt/trakt/core/home/sections/recommended/usecase
+      1 app/src/main/java/tv/trakt/trakt/core/home/sections/recommended/usecase/media
+      1 app/src/main/java/tv/trakt/trakt/core/home/sections/recommended/usecase/movies
+      1 app/src/main/java/tv/trakt/trakt/core/home/sections/recommended/usecase/shows
+      6 app/src/main/java/tv/trakt/trakt/core/home/sections/recommended/whythis
+      3 app/src/main/java/tv/trakt/trakt/core/home/sections/streaks
+      4 app/src/main/java/tv/trakt/trakt/core/home/sections/streaks/all
+      1 app/src/main/java/tv/trakt/trakt/core/home/sections/streaks/all/ui
+      2 app/src/main/java/tv/trakt/trakt/core/home/sections/streaks/data
+      1 app/src/main/java/tv/trakt/trakt/core/home/sections/streaks/model
+      3 app/src/main/java/tv/trakt/trakt/core/home/sections/upcoming
+      1 app/src/main/java/tv/trakt/trakt/core/home/sections/upcoming/usecases
+      2 app/src/main/java/tv/trakt/trakt/core/home/sections/upcoming/views
+      3 app/src/main/java/tv/trakt/trakt/core/home/sections/upnext
+      3 app/src/main/java/tv/trakt/trakt/core/home/sections/upnext/features/all
+      1 app/src/main/java/tv/trakt/trakt/core/home/sections/upnext/features/all/navigation
+      2 app/src/main/java/tv/trakt/trakt/core/home/sections/upnext/features/all/ui
+      3 app/src/main/java/tv/trakt/trakt/core/home/sections/upnext/features/context
+      1 app/src/main/java/tv/trakt/trakt/core/home/sections/upnext/features/context/sheets
+      3 app/src/main/java/tv/trakt/trakt/core/home/sections/upnext/model
+      2 app/src/main/java/tv/trakt/trakt/core/home/sections/upnext/ui
+      2 app/src/main/java/tv/trakt/trakt/core/home/sections/upnext/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/home/sections/watchlist
+      3 app/src/main/java/tv/trakt/trakt/core/home/sections/watchlist/features/all
+      1 app/src/main/java/tv/trakt/trakt/core/home/sections/watchlist/features/all/navigation
+      1 app/src/main/java/tv/trakt/trakt/core/home/sections/watchlist/features/all/ui
+      3 app/src/main/java/tv/trakt/trakt/core/home/sections/watchlist/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/home/sections/welcome/banner
+      2 app/src/main/java/tv/trakt/trakt/core/home/sections/welcome/sheet
+      2 app/src/main/java/tv/trakt/trakt/core/home/sections/welcome/usecases
+      2 app/src/main/java/tv/trakt/trakt/core/home/views
+      5 app/src/main/java/tv/trakt/trakt/core/inreview
+      1 app/src/main/java/tv/trakt/trakt/core/inreview/di
+      1 app/src/main/java/tv/trakt/trakt/core/inreview/navigation
+      5 app/src/main/java/tv/trakt/trakt/core/klipy
+      1 app/src/main/java/tv/trakt/trakt/core/klipy/di
+      4 app/src/main/java/tv/trakt/trakt/core/klipy/ui
+      4 app/src/main/java/tv/trakt/trakt/core/lists
+      1 app/src/main/java/tv/trakt/trakt/core/lists/di
+      3 app/src/main/java/tv/trakt/trakt/core/lists/features/all
+      1 app/src/main/java/tv/trakt/trakt/core/lists/features/all/navigation
+      3 app/src/main/java/tv/trakt/trakt/core/lists/features/details
+      1 app/src/main/java/tv/trakt/trakt/core/lists/features/details/navigation
+      4 app/src/main/java/tv/trakt/trakt/core/lists/features/details/ui
+      1 app/src/main/java/tv/trakt/trakt/core/lists/features/details/usecases
+      5 app/src/main/java/tv/trakt/trakt/core/lists/features/manage
+      3 app/src/main/java/tv/trakt/trakt/core/lists/features/reorder
+      3 app/src/main/java/tv/trakt/trakt/core/lists/features/reorder/lists
+      1 app/src/main/java/tv/trakt/trakt/core/lists/features/reorder/lists/navigation
+      1 app/src/main/java/tv/trakt/trakt/core/lists/features/reorder/lists/usecase
+      1 app/src/main/java/tv/trakt/trakt/core/lists/features/reorder/navigation
+      6 app/src/main/java/tv/trakt/trakt/core/lists/features/reorder/ui
+      1 app/src/main/java/tv/trakt/trakt/core/lists/features/reorder/usecase
+      3 app/src/main/java/tv/trakt/trakt/core/lists/features/reorder/watchlist
+      1 app/src/main/java/tv/trakt/trakt/core/lists/features/reorder/watchlist/navigation
+      1 app/src/main/java/tv/trakt/trakt/core/lists/features/reorder/watchlist/usecase
+      3 app/src/main/java/tv/trakt/trakt/core/lists/features/smart
+      1 app/src/main/java/tv/trakt/trakt/core/lists/features/smart/navigation
+      3 app/src/main/java/tv/trakt/trakt/core/lists/features/smart/ui
+      2 app/src/main/java/tv/trakt/trakt/core/lists/features/smart/usecase
+      2 app/src/main/java/tv/trakt/trakt/core/lists/model
+      1 app/src/main/java/tv/trakt/trakt/core/lists/navigation
+      1 app/src/main/java/tv/trakt/trakt/core/lists/sections/collaborations/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/lists/sections/liked/usecases
+      2 app/src/main/java/tv/trakt/trakt/core/lists/sections/liked/usecases/manage
+      3 app/src/main/java/tv/trakt/trakt/core/lists/sections/personal/features/all
+      1 app/src/main/java/tv/trakt/trakt/core/lists/sections/personal/features/all/navigation
+      4 app/src/main/java/tv/trakt/trakt/core/lists/sections/personal/features/context/item
+      3 app/src/main/java/tv/trakt/trakt/core/lists/sections/personal/features/context/movie
+      1 app/src/main/java/tv/trakt/trakt/core/lists/sections/personal/features/context/movie/sheet
+      3 app/src/main/java/tv/trakt/trakt/core/lists/sections/personal/features/context/show
+      1 app/src/main/java/tv/trakt/trakt/core/lists/sections/personal/features/context/show/sheet
+      2 app/src/main/java/tv/trakt/trakt/core/lists/sections/personal/model
+      2 app/src/main/java/tv/trakt/trakt/core/lists/sections/personal/ui
+      2 app/src/main/java/tv/trakt/trakt/core/lists/sections/personal/usecases
+      2 app/src/main/java/tv/trakt/trakt/core/lists/sections/personal/usecases/manage
+      3 app/src/main/java/tv/trakt/trakt/core/lists/sections/smart/details
+      1 app/src/main/java/tv/trakt/trakt/core/lists/sections/smart/details/navigation
+      3 app/src/main/java/tv/trakt/trakt/core/lists/sections/smart/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/lists/sections/watchlist
+      3 app/src/main/java/tv/trakt/trakt/core/lists/sections/watchlist/features/all
+      1 app/src/main/java/tv/trakt/trakt/core/lists/sections/watchlist/features/all/navigation
+      2 app/src/main/java/tv/trakt/trakt/core/lists/sections/watchlist/features/all/views
+      3 app/src/main/java/tv/trakt/trakt/core/lists/sections/watchlist/features/context/movies
+      1 app/src/main/java/tv/trakt/trakt/core/lists/sections/watchlist/features/context/movies/sheets
+      3 app/src/main/java/tv/trakt/trakt/core/lists/sections/watchlist/features/context/shows
+      1 app/src/main/java/tv/trakt/trakt/core/lists/sections/watchlist/features/context/shows/sheets
+      1 app/src/main/java/tv/trakt/trakt/core/lists/sections/watchlist/model
+      3 app/src/main/java/tv/trakt/trakt/core/lists/sections/watchlist/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/lists/sections/watchlist/usecases/filters
+      1 app/src/main/java/tv/trakt/trakt/core/lists/sections/watchlist/views
+      3 app/src/main/java/tv/trakt/trakt/core/lists/sheets
+      3 app/src/main/java/tv/trakt/trakt/core/lists/sheets/create
+      1 app/src/main/java/tv/trakt/trakt/core/lists/sheets/create/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/lists/sheets/createtype
+      3 app/src/main/java/tv/trakt/trakt/core/lists/sheets/edit
+      1 app/src/main/java/tv/trakt/trakt/core/lists/sheets/edit/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/lists/usecases
+      5 app/src/main/java/tv/trakt/trakt/core/main
+      1 app/src/main/java/tv/trakt/trakt/core/main/di
+      1 app/src/main/java/tv/trakt/trakt/core/main/model
+      3 app/src/main/java/tv/trakt/trakt/core/main/navigation
+      1 app/src/main/java/tv/trakt/trakt/core/main/ui/checkin
+      1 app/src/main/java/tv/trakt/trakt/core/main/ui/inputhold
+      3 app/src/main/java/tv/trakt/trakt/core/main/ui/locked
+      1 app/src/main/java/tv/trakt/trakt/core/main/ui/menubar
+      1 app/src/main/java/tv/trakt/trakt/core/main/ui/rateprompt
+     10 app/src/main/java/tv/trakt/trakt/core/main/ui/seasonal
+      5 app/src/main/java/tv/trakt/trakt/core/main/ui/seasonal/christmas
+      3 app/src/main/java/tv/trakt/trakt/core/main/ui/seasonal/halloween
+      4 app/src/main/java/tv/trakt/trakt/core/main/ui/seasonal/newyear
+      1 app/src/main/java/tv/trakt/trakt/core/main/ui/yir
+      4 app/src/main/java/tv/trakt/trakt/core/main/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/movies/di
+      2 app/src/main/java/tv/trakt/trakt/core/movies/ui
+      3 app/src/main/java/tv/trakt/trakt/core/movies/ui/context
+      1 app/src/main/java/tv/trakt/trakt/core/movies/ui/context/sheet
+      2 app/src/main/java/tv/trakt/trakt/core/notifications
+      2 app/src/main/java/tv/trakt/trakt/core/notifications/data/work
+      2 app/src/main/java/tv/trakt/trakt/core/notifications/data/work/mir
+      1 app/src/main/java/tv/trakt/trakt/core/notifications/di
+      4 app/src/main/java/tv/trakt/trakt/core/notifications/model
+      2 app/src/main/java/tv/trakt/trakt/core/notifications/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/people/di
+      2 app/src/main/java/tv/trakt/trakt/core/people/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/profile
+      1 app/src/main/java/tv/trakt/trakt/core/profile/di
+      1 app/src/main/java/tv/trakt/trakt/core/profile/helpers
+      1 app/src/main/java/tv/trakt/trakt/core/profile/navigation
+      3 app/src/main/java/tv/trakt/trakt/core/profile/sections/activity
+      3 app/src/main/java/tv/trakt/trakt/core/profile/sections/activity/all
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/activity/all/navigation
+      4 app/src/main/java/tv/trakt/trakt/core/profile/sections/activity/all/ui
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/activity/all/ui/filters
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/activity/data/local/comments
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/activity/data/local/ratings
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/activity/model
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/activity/ui/comments
+      4 app/src/main/java/tv/trakt/trakt/core/profile/sections/activity/ui/ratings
+      3 app/src/main/java/tv/trakt/trakt/core/profile/sections/activity/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/activity/usecases/filters
+      3 app/src/main/java/tv/trakt/trakt/core/profile/sections/favorites
+      3 app/src/main/java/tv/trakt/trakt/core/profile/sections/favorites/all
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/favorites/all/navigation
+      2 app/src/main/java/tv/trakt/trakt/core/profile/sections/favorites/all/views
+      4 app/src/main/java/tv/trakt/trakt/core/profile/sections/favorites/context/movie
+      4 app/src/main/java/tv/trakt/trakt/core/profile/sections/favorites/context/show
+      2 app/src/main/java/tv/trakt/trakt/core/profile/sections/favorites/views
+      3 app/src/main/java/tv/trakt/trakt/core/profile/sections/history
+      3 app/src/main/java/tv/trakt/trakt/core/profile/sections/leaderboard
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/leaderboard/navigation
+      4 app/src/main/java/tv/trakt/trakt/core/profile/sections/leaderboard/ui
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/leaderboard/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/profile/sections/library
+      3 app/src/main/java/tv/trakt/trakt/core/profile/sections/library/all
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/library/all/navigation
+      2 app/src/main/java/tv/trakt/trakt/core/profile/sections/library/all/views
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/library/model
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/library/usecases
+      2 app/src/main/java/tv/trakt/trakt/core/profile/sections/library/views
+      3 app/src/main/java/tv/trakt/trakt/core/profile/sections/progress
+      3 app/src/main/java/tv/trakt/trakt/core/profile/sections/progress/all
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/progress/all/navigation
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/progress/all/views
+      4 app/src/main/java/tv/trakt/trakt/core/profile/sections/progress/context
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/progress/data/local/completed
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/progress/data/local/dropped
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/progress/data/local/watching
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/progress/filters
+      4 app/src/main/java/tv/trakt/trakt/core/profile/sections/progress/model
+      3 app/src/main/java/tv/trakt/trakt/core/profile/sections/progress/usecase
+      2 app/src/main/java/tv/trakt/trakt/core/profile/sections/progress/views
+      3 app/src/main/java/tv/trakt/trakt/core/profile/sections/screentime
+      4 app/src/main/java/tv/trakt/trakt/core/profile/sections/screentime/all
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/screentime/data/local
+      3 app/src/main/java/tv/trakt/trakt/core/profile/sections/screentime/ui
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/screentime/usecase
+      3 app/src/main/java/tv/trakt/trakt/core/profile/sections/social
+      3 app/src/main/java/tv/trakt/trakt/core/profile/sections/social/all
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/social/all/navigation
+      2 app/src/main/java/tv/trakt/trakt/core/profile/sections/social/all/ui
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/social/model
+      2 app/src/main/java/tv/trakt/trakt/core/profile/sections/social/ui
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/social/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/thismonth
+      2 app/src/main/java/tv/trakt/trakt/core/profile/sections/thismonth/all
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/thismonth/model
+      1 app/src/main/java/tv/trakt/trakt/core/profile/sections/thismonth/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/ratings
+      4 app/src/main/java/tv/trakt/trakt/core/ratings/allratings
+      2 app/src/main/java/tv/trakt/trakt/core/ratings/allratings/ui
+      1 app/src/main/java/tv/trakt/trakt/core/ratings/allratings/usecases
+      2 app/src/main/java/tv/trakt/trakt/core/ratings/data/work
+      1 app/src/main/java/tv/trakt/trakt/core/ratings/di
+      2 app/src/main/java/tv/trakt/trakt/core/ratings/rateprompt
+      2 app/src/main/java/tv/trakt/trakt/core/ratings/rateprompt/model
+      3 app/src/main/java/tv/trakt/trakt/core/ratings/rateprompt/ui
+      1 app/src/main/java/tv/trakt/trakt/core/ratings/rateprompt/usecases
+      4 app/src/main/java/tv/trakt/trakt/core/ratings/ui
+      1 app/src/main/java/tv/trakt/trakt/core/reactions/data
+      2 app/src/main/java/tv/trakt/trakt/core/reactions/data/work
+      1 app/src/main/java/tv/trakt/trakt/core/reactions/di
+      3 app/src/main/java/tv/trakt/trakt/core/reactions/media
+      6 app/src/main/java/tv/trakt/trakt/core/reactions/media/ui
+      4 app/src/main/java/tv/trakt/trakt/core/reactions/media/usecases
+      4 app/src/main/java/tv/trakt/trakt/core/reactions/ui
+      2 app/src/main/java/tv/trakt/trakt/core/reactions/usecases
+      4 app/src/main/java/tv/trakt/trakt/core/report
+      1 app/src/main/java/tv/trakt/trakt/core/report/di
+      2 app/src/main/java/tv/trakt/trakt/core/report/model
+      1 app/src/main/java/tv/trakt/trakt/core/report/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/search
+      1 app/src/main/java/tv/trakt/trakt/core/search/data/local/people
+      1 app/src/main/java/tv/trakt/trakt/core/search/data/local/popular
+      1 app/src/main/java/tv/trakt/trakt/core/search/di
+      3 app/src/main/java/tv/trakt/trakt/core/search/features/game
+      1 app/src/main/java/tv/trakt/trakt/core/search/features/game/navigation
+      1 app/src/main/java/tv/trakt/trakt/core/search/features/game/ui
+      3 app/src/main/java/tv/trakt/trakt/core/search/model
+      1 app/src/main/java/tv/trakt/trakt/core/search/navigation
+      1 app/src/main/java/tv/trakt/trakt/core/search/usecase
+      2 app/src/main/java/tv/trakt/trakt/core/search/usecase/popular
+      2 app/src/main/java/tv/trakt/trakt/core/search/views
+      4 app/src/main/java/tv/trakt/trakt/core/search/views/items
+      3 app/src/main/java/tv/trakt/trakt/core/settings
+      1 app/src/main/java/tv/trakt/trakt/core/settings/data
+      1 app/src/main/java/tv/trakt/trakt/core/settings/di
+      3 app/src/main/java/tv/trakt/trakt/core/settings/features/blocked
+      4 app/src/main/java/tv/trakt/trakt/core/settings/features/cover
+      2 app/src/main/java/tv/trakt/trakt/core/settings/features/notifications
+      3 app/src/main/java/tv/trakt/trakt/core/settings/features/younify
+      4 app/src/main/java/tv/trakt/trakt/core/settings/features/younify/model
+      1 app/src/main/java/tv/trakt/trakt/core/settings/features/younify/navigation
+      4 app/src/main/java/tv/trakt/trakt/core/settings/features/younify/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/settings/navigation
+      4 app/src/main/java/tv/trakt/trakt/core/settings/ui
+      4 app/src/main/java/tv/trakt/trakt/core/settings/usecases
+      4 app/src/main/java/tv/trakt/trakt/core/share
+      1 app/src/main/java/tv/trakt/trakt/core/share/di
+      1 app/src/main/java/tv/trakt/trakt/core/share/model
+      1 app/src/main/java/tv/trakt/trakt/core/shows/di
+      2 app/src/main/java/tv/trakt/trakt/core/shows/ui
+      3 app/src/main/java/tv/trakt/trakt/core/shows/ui/context
+      1 app/src/main/java/tv/trakt/trakt/core/shows/ui/context/sheet
+      3 app/src/main/java/tv/trakt/trakt/core/streamings
+      1 app/src/main/java/tv/trakt/trakt/core/streamings/di
+      1 app/src/main/java/tv/trakt/trakt/core/streamings/navigation
+      4 app/src/main/java/tv/trakt/trakt/core/streamings/ui
+      3 app/src/main/java/tv/trakt/trakt/core/summary/credits
+      1 app/src/main/java/tv/trakt/trakt/core/summary/credits/di
+      3 app/src/main/java/tv/trakt/trakt/core/summary/credits/model
+      1 app/src/main/java/tv/trakt/trakt/core/summary/credits/navigation
+      1 app/src/main/java/tv/trakt/trakt/core/summary/credits/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/summary/episodes
+      1 app/src/main/java/tv/trakt/trakt/core/summary/episodes/di
+      3 app/src/main/java/tv/trakt/trakt/core/summary/episodes/features/actors
+      2 app/src/main/java/tv/trakt/trakt/core/summary/episodes/features/actors/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/summary/episodes/features/comments
+      1 app/src/main/java/tv/trakt/trakt/core/summary/episodes/features/comments/usecases
+      4 app/src/main/java/tv/trakt/trakt/core/summary/episodes/features/context/more
+      3 app/src/main/java/tv/trakt/trakt/core/summary/episodes/features/history
+      1 app/src/main/java/tv/trakt/trakt/core/summary/episodes/features/history/navigation
+      1 app/src/main/java/tv/trakt/trakt/core/summary/episodes/features/history/usecases
+      4 app/src/main/java/tv/trakt/trakt/core/summary/episodes/features/info
+      2 app/src/main/java/tv/trakt/trakt/core/summary/episodes/features/info/usecase
+      3 app/src/main/java/tv/trakt/trakt/core/summary/episodes/features/related
+      1 app/src/main/java/tv/trakt/trakt/core/summary/episodes/features/related/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/summary/episodes/features/season
+      1 app/src/main/java/tv/trakt/trakt/core/summary/episodes/features/season/ui
+      2 app/src/main/java/tv/trakt/trakt/core/summary/episodes/features/season/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/summary/episodes/features/socials
+      3 app/src/main/java/tv/trakt/trakt/core/summary/episodes/features/streaming
+      1 app/src/main/java/tv/trakt/trakt/core/summary/episodes/navigation
+      2 app/src/main/java/tv/trakt/trakt/core/summary/episodes/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/summary/helpers
+      3 app/src/main/java/tv/trakt/trakt/core/summary/movies
+      1 app/src/main/java/tv/trakt/trakt/core/summary/movies/di
+      3 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/actors
+      2 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/actors/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/comments
+      1 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/comments/usecases
+      4 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/context/more
+      3 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/extras
+      1 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/extras/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/history
+      1 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/history/navigation
+      1 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/history/usecases
+      4 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/info
+      3 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/info/usecase
+      3 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/lists
+      1 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/lists/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/related
+      1 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/related/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/sentiment
+      1 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/sentiment/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/socials
+      3 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/streaming
+      3 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/trivia
+      1 app/src/main/java/tv/trakt/trakt/core/summary/movies/features/trivia/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/summary/movies/navigation
+      2 app/src/main/java/tv/trakt/trakt/core/summary/movies/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/summary/people
+      4 app/src/main/java/tv/trakt/trakt/core/summary/people/all
+      1 app/src/main/java/tv/trakt/trakt/core/summary/people/all/views
+      1 app/src/main/java/tv/trakt/trakt/core/summary/people/di
+      2 app/src/main/java/tv/trakt/trakt/core/summary/people/helpers
+      4 app/src/main/java/tv/trakt/trakt/core/summary/people/model
+      1 app/src/main/java/tv/trakt/trakt/core/summary/people/navigation
+      5 app/src/main/java/tv/trakt/trakt/core/summary/people/ui
+      3 app/src/main/java/tv/trakt/trakt/core/summary/sentiment
+      1 app/src/main/java/tv/trakt/trakt/core/summary/sentiment/di
+      1 app/src/main/java/tv/trakt/trakt/core/summary/sentiment/navigation
+      1 app/src/main/java/tv/trakt/trakt/core/summary/sentiment/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/summary/shows
+      1 app/src/main/java/tv/trakt/trakt/core/summary/shows/di
+      3 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/actors
+      2 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/actors/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/comments
+      1 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/comments/usecases
+      2 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/context/episodes
+      4 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/context/more
+      2 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/context/seasons
+      3 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/extras
+      1 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/extras/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/history
+      1 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/history/navigation
+      1 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/history/usecases
+      4 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/info
+      4 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/info/usecase
+      3 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/lists
+      1 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/lists/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/related
+      1 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/related/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/seasons
+      5 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/seasons/all
+      2 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/seasons/all/helpers
+      1 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/seasons/all/navigation
+      6 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/seasons/all/ui
+      2 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/seasons/all/usecases
+      5 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/seasons/model
+      3 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/seasons/ui
+      1 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/seasons/usecases
+      4 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/seasons/watcheduntil
+      1 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/seasons/watcheduntil/helpers
+      4 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/seasons/watcheduntil/ui
+      1 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/seasons/watcheduntil/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/sentiment
+      1 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/sentiment/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/socials
+      3 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/streaming
+      3 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/trivia
+      1 app/src/main/java/tv/trakt/trakt/core/summary/shows/features/trivia/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/summary/shows/navigation
+      3 app/src/main/java/tv/trakt/trakt/core/summary/shows/usecases
+      4 app/src/main/java/tv/trakt/trakt/core/summary/social
+      1 app/src/main/java/tv/trakt/trakt/core/summary/social/di
+      1 app/src/main/java/tv/trakt/trakt/core/summary/social/model
+      2 app/src/main/java/tv/trakt/trakt/core/summary/social/recommendedby
+      1 app/src/main/java/tv/trakt/trakt/core/summary/social/recommendedby/model
+      1 app/src/main/java/tv/trakt/trakt/core/summary/social/recommendedby/ui
+      1 app/src/main/java/tv/trakt/trakt/core/summary/social/recommendedby/usecases
+      2 app/src/main/java/tv/trakt/trakt/core/summary/social/ui
+      7 app/src/main/java/tv/trakt/trakt/core/summary/ui
+      5 app/src/main/java/tv/trakt/trakt/core/summary/ui/header
+      2 app/src/main/java/tv/trakt/trakt/core/summary/ui/header/poster
+      1 app/src/main/java/tv/trakt/trakt/core/summary/ui/header/social
+      7 app/src/main/java/tv/trakt/trakt/core/summary/ui/views
+      5 app/src/main/java/tv/trakt/trakt/core/summary/ui/views/info
+      1 app/src/main/java/tv/trakt/trakt/core/sync/di
+      7 app/src/main/java/tv/trakt/trakt/core/sync/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/today/data/local
+      1 app/src/main/java/tv/trakt/trakt/core/today/di
+      6 app/src/main/java/tv/trakt/trakt/core/today/model
+      3 app/src/main/java/tv/trakt/trakt/core/today/pill
+      3 app/src/main/java/tv/trakt/trakt/core/today/stories
+      3 app/src/main/java/tv/trakt/trakt/core/today/stories/details
+      1 app/src/main/java/tv/trakt/trakt/core/today/stories/navigation
+      6 app/src/main/java/tv/trakt/trakt/core/today/stories/ui
+      4 app/src/main/java/tv/trakt/trakt/core/today/stories/watched
+      4 app/src/main/java/tv/trakt/trakt/core/today/stories/watchlist
+      5 app/src/main/java/tv/trakt/trakt/core/today/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/trivia
+      1 app/src/main/java/tv/trakt/trakt/core/trivia/di
+      2 app/src/main/java/tv/trakt/trakt/core/trivia/model
+      1 app/src/main/java/tv/trakt/trakt/core/trivia/navigation
+      2 app/src/main/java/tv/trakt/trakt/core/trivia/ui
+      1 app/src/main/java/tv/trakt/trakt/core/user/model
+      2 app/src/main/java/tv/trakt/trakt/core/user/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/user/usecases/ratings
+      1 app/src/main/java/tv/trakt/trakt/core/user/usecases/reactions
+      2 app/src/main/java/tv/trakt/trakt/core/user/usecases/social
+      4 app/src/main/java/tv/trakt/trakt/core/userprofile
+      1 app/src/main/java/tv/trakt/trakt/core/userprofile/di
+      1 app/src/main/java/tv/trakt/trakt/core/userprofile/navigation
+      3 app/src/main/java/tv/trakt/trakt/core/userprofile/sections/favorites
+      4 app/src/main/java/tv/trakt/trakt/core/userprofile/sections/favorites/all
+      1 app/src/main/java/tv/trakt/trakt/core/userprofile/sections/favorites/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/userprofile/sections/history
+      4 app/src/main/java/tv/trakt/trakt/core/userprofile/sections/history/all
+      1 app/src/main/java/tv/trakt/trakt/core/userprofile/sections/history/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/userprofile/sections/lists
+      4 app/src/main/java/tv/trakt/trakt/core/userprofile/sections/lists/all
+      1 app/src/main/java/tv/trakt/trakt/core/userprofile/sections/lists/usecases
+      2 app/src/main/java/tv/trakt/trakt/core/userprofile/sections/match
+      1 app/src/main/java/tv/trakt/trakt/core/userprofile/sections/match/model
+      4 app/src/main/java/tv/trakt/trakt/core/userprofile/sections/match/ui
+      1 app/src/main/java/tv/trakt/trakt/core/userprofile/sections/match/usecases
+      3 app/src/main/java/tv/trakt/trakt/core/userprofile/sections/social
+      1 app/src/main/java/tv/trakt/trakt/core/userprofile/sections/social/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/userprofile/sections/thismonth
+      1 app/src/main/java/tv/trakt/trakt/core/userprofile/usecases
+      1 app/src/main/java/tv/trakt/trakt/core/welcome
+      1 app/src/main/java/tv/trakt/trakt/core/welcome/onboarding
+      4 app/src/main/java/tv/trakt/trakt/core/welcome/onboarding/pages
+      3 app/src/main/java/tv/trakt/trakt/helpers
+      2 app/src/main/java/tv/trakt/trakt/helpers/collapsing
+      1 app/src/main/java/tv/trakt/trakt/helpers/collapsing/model
+      1 app/src/main/java/tv/trakt/trakt/helpers/extensions
+      3 app/src/main/java/tv/trakt/trakt/helpers/player
+      1 app/src/main/java/tv/trakt/trakt/helpers/player/di
+      1 app/src/main/java/tv/trakt/trakt/helpers/player/navigation
+     13 app/src/main/java/tv/trakt/trakt/ui/components
+      6 app/src/main/java/tv/trakt/trakt/ui/components/buttons
+      2 app/src/main/java/tv/trakt/trakt/ui/components/buttons/lists
+      4 app/src/main/java/tv/trakt/trakt/ui/components/chips
+      2 app/src/main/java/tv/trakt/trakt/ui/components/confirmation
+      3 app/src/main/java/tv/trakt/trakt/ui/components/dateselection
+      5 app/src/main/java/tv/trakt/trakt/ui/components/dateselection/otherdatepicker
+      1 app/src/main/java/tv/trakt/trakt/ui/components/dateselection/otherdatepicker/di
+      1 app/src/main/java/tv/trakt/trakt/ui/components/headerbar
+      1 app/src/main/java/tv/trakt/trakt/ui/components/headerbar/model
+      2 app/src/main/java/tv/trakt/trakt/ui/components/input
+      3 app/src/main/java/tv/trakt/trakt/ui/components/lists
+      4 app/src/main/java/tv/trakt/trakt/ui/components/mediacards
+      3 app/src/main/java/tv/trakt/trakt/ui/components/mediacards/list
+      7 app/src/main/java/tv/trakt/trakt/ui/components/mediacards/skeletons
+      2 app/src/main/java/tv/trakt/trakt/ui/components/notifications
+      3 app/src/main/java/tv/trakt/trakt/ui/components/seasonal
+      1 app/src/main/java/tv/trakt/trakt/ui/components/sorting
+      2 app/src/main/java/tv/trakt/trakt/ui/components/sorting/sheets
+      1 app/src/main/java/tv/trakt/trakt/ui/components/switch
+      3 app/src/main/java/tv/trakt/trakt/ui/components/vip
+      3 app/src/main/java/tv/trakt/trakt/ui/components/whatsnew
+      1 app/src/main/java/tv/trakt/trakt/ui/components/yir
+      2 app/src/main/java/tv/trakt/trakt/ui/extensions
+      1 app/src/main/java/tv/trakt/trakt/ui/snackbar
+      6 app/src/main/java/tv/trakt/trakt/ui/theme
+      2 app/src/main/java/tv/trakt/trakt/ui/theme/model
+      1 app/src/main/java/tv/trakt/trakt/widgets
+      5 app/src/main/java/tv/trakt/trakt/widgets/configuration
+      2 app/src/main/java/tv/trakt/trakt/widgets/data
+      1 app/src/main/java/tv/trakt/trakt/widgets/di
+      2 app/src/main/java/tv/trakt/trakt/widgets/model
+      3 app/src/main/java/tv/trakt/trakt/widgets/ui
+      4 app/src/main/java/tv/trakt/trakt/widgets/widget/calendar
+      1 app/src/main/java/tv/trakt/trakt/widgets/widget/calendar/data
+      1 app/src/main/java/tv/trakt/trakt/widgets/widget/calendar/ui
+      4 app/src/main/java/tv/trakt/trakt/widgets/widget/continuewatching
+      1 app/src/main/java/tv/trakt/trakt/widgets/widget/continuewatching/actions
+      1 app/src/main/java/tv/trakt/trakt/widgets/widget/continuewatching/data
+      2 app/src/main/java/tv/trakt/trakt/widgets/widget/continuewatching/ui
+      1 app/src/main/java/tv/trakt/trakt/widgets/widget/continuewatching/usecases
+      4 app/src/main/java/tv/trakt/trakt/widgets/widget/streaks
+      1 app/src/main/java/tv/trakt/trakt/widgets/widget/streaks/data
+      1 app/src/main/res
+      1 buildSrc
+      1 buildSrc/src/main/kotlin
+      1 common
+      1 common/src/main/java/tv/trakt/trakt/common
+      2 common/src/main/java/tv/trakt/trakt/common/auth
+      1 common/src/main/java/tv/trakt/trakt/common/auth/di
+      5 common/src/main/java/tv/trakt/trakt/common/auth/model
+      3 common/src/main/java/tv/trakt/trakt/common/auth/session
+      1 common/src/main/java/tv/trakt/trakt/common/auth/work
+      2 common/src/main/java/tv/trakt/trakt/common/core/comments/usecases
+      2 common/src/main/java/tv/trakt/trakt/common/core/favorites
+      3 common/src/main/java/tv/trakt/trakt/common/core/home/model
+      1 common/src/main/java/tv/trakt/trakt/common/core/klipy/data/remote
+      4 common/src/main/java/tv/trakt/trakt/common/core/klipy/model
+      1 common/src/main/java/tv/trakt/trakt/common/core/library
+      1 common/src/main/java/tv/trakt/trakt/common/core/lists/model
+      1 common/src/main/java/tv/trakt/trakt/common/core/search/usecase
+      1 common/src/main/java/tv/trakt/trakt/common/core/streamings/data/local
+      1 common/src/main/java/tv/trakt/trakt/common/core/streamings/di
+      3 common/src/main/java/tv/trakt/trakt/common/core/streamings/helpers
+      4 common/src/main/java/tv/trakt/trakt/common/core/streamings/model
+      4 common/src/main/java/tv/trakt/trakt/common/core/streamings/usecase
+      4 common/src/main/java/tv/trakt/trakt/common/core/sync/changes
+      1 common/src/main/java/tv/trakt/trakt/common/core/sync/changes/di
+      1 common/src/main/java/tv/trakt/trakt/common/core/sync/model
+      3 common/src/main/java/tv/trakt/trakt/common/core/today/model
+
+
+===== openapi folder =====
+openapi/TODO.md
+openapi/openapi.json
+
+--- openapi/openapi.json (first 60 lines) ---
+{
+  "openapi": "3.0.2",
+  "paths": {
+    "/oauth/authorize": {
+      "get": {
+        "description": "Construct then redirect to this URL. The Trakt website will request permissions for your app, which the user needs to approve. If the user isn't signed into Trakt, it will ask them to do so.\n\n> ### Important\n> _Use the **https://auth.trakt.tv** hostname for all OAuth requests, including authorization, device authentication, token exchange and refresh, and token revocation. Do not use the API hostname for these requests._\n\n#### Optional URL Parameters\n\nWhen building the authorization URL, you can optionally include the following query parameters in the URL.\n\n| Parameter | Value | Description |\n|---|---|---|\n| `signup` | `true` | Prefer the account sign up page to be the default. |\n| `prompt` | `login` | Force the user to sign in and authorize your app. |\n\n#### PKCE\n\n[PKCE](https://developer.trakt.tv/docs/pkce) is the recommended way to sign users in. Send these parameters, then send the matching `code_verifier` instead of a `client_secret` when you exchange the code.\n\n| Parameter | Value | Description |\n|---|---|---|\n| `code_challenge` | string | The base64url-encoded SHA-256 hash of your `code_verifier`. |\n| `code_challenge_method` | `S256` | The only supported method. |\n\n> ### Note\n> _`client_secret` is deprecated in favor of [PKCE](https://developer.trakt.tv/docs/pkce). It is optional, and should only be sent from your own server, never from a website, mobile app, or desktop app._",
+        "summary": "Authorize Application",
+        "tags": [
+          "oauth"
+        ],
+        "parameters": [
+          {
+            "name": "response_type",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "client_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "redirect_uri",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code_challenge",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code_challenge_method",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "S256"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "200",
+
+
+===== FILES TOUCHING THE API / AUTH LAYER =====
+app/build.gradle.kts
+app/src/main/java/tv/trakt/trakt/core/applinks/usecases/ResolveImdbLinkUseCase.kt
+app/src/main/java/tv/trakt/trakt/core/auth/ConfigAuth.kt
+app/src/main/java/tv/trakt/trakt/core/auth/Pkce.kt
+app/src/main/java/tv/trakt/trakt/core/checkin/data/DefaultCheckInManager.kt
+app/src/main/java/tv/trakt/trakt/core/home/sections/activity/usecases/GetPersonalActivityUseCase.kt
+app/src/main/java/tv/trakt/trakt/core/home/sections/activity/usecases/GetSocialActivityUseCase.kt
+app/src/main/java/tv/trakt/trakt/core/lists/features/smart/usecase/CreateSmartListUseCase.kt
+app/src/main/java/tv/trakt/trakt/core/sync/usecases/UpdateEpisodeHistoryUseCase.kt
+app/src/main/java/tv/trakt/trakt/core/sync/usecases/UpdateMovieHistoryUseCase.kt
+app/src/main/java/tv/trakt/trakt/core/user/usecases/LogoutUserUseCase.kt
+build.gradle.kts
+common/build.gradle.kts
+common/src/main/java/tv/trakt/trakt/common/auth/model/AuthDeviceTokenCode.kt
+common/src/main/java/tv/trakt/trakt/common/core/search/usecase/GetSearchResultsUseCase.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/AuthRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/BillingRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/CheckInRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/CommentsRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/EpisodesRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/EpisodesSyncRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/ListsRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/MediaRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/MoviesRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/MoviesSyncRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/PeopleRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/RatingsRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/ReactionsRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/ReportRequest.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/SearchRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/ShowsRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/ShowsSyncRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/StreamingRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/TranslationsRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/UserCalendarRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/UserFavoritesRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/UserHistoryRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/UserOtherListsRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/UserPersonalListsRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/UserRatingsRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/UserRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/UserSmartListsRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/UserSocialRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/UserWatchlistRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/YounifyRemoteSource.kt
+common/src/main/java/tv/trakt/trakt/common/data/remote/di/RemoteSourcesModule.kt
+common/src/main/java/tv/trakt/trakt/common/data/request/TokenExchangeRequest.kt
+common/src/main/java/tv/trakt/trakt/common/firebase/analytics/di/AnalyticsModule.kt
+common/src/main/java/tv/trakt/trakt/common/firebase/analytics/implementation/hal/data/remote/HalSender.kt
+common/src/main/java/tv/trakt/trakt/common/networking/OpenApiAliases.kt
+common/src/main/java/tv/trakt/trakt/common/networking/api/klipy/KlipyApi.kt
+common/src/main/java/tv/trakt/trakt/common/networking/api/people/PeopleExtrasApi.kt
+common/src/main/java/tv/trakt/trakt/common/networking/api/plex/PlexStreamApi.kt
+common/src/main/java/tv/trakt/trakt/common/networking/api/scrobble/ScrobbleExtrasApi.kt
+common/src/main/java/tv/trakt/trakt/common/networking/api/scrobble/model/GetSyncProgressEpisodesResponse.kt
+common/src/main/java/tv/trakt/trakt/common/networking/api/scrobble/model/PostScrobbleMovieRequest.kt
+common/src/main/java/tv/trakt/trakt/common/networking/api/v3/V3Api.kt
+common/src/main/java/tv/trakt/trakt/common/networking/client/KtorClientConfig.kt
+common/src/main/java/tv/trakt/trakt/common/networking/client/KtorClientFactory.kt
+common/src/main/java/tv/trakt/trakt/common/networking/di/NetworkingModule.kt
+common/src/main/java/tv/trakt/trakt/common/networking/helpers/OAuthErrors.kt
+tv/build.gradle.kts
+tv/src/main/java/tv/trakt/trakt/app/core/details/lists/details/media/usecases/GetListItemsUseCase.kt
+tv/src/main/java/tv/trakt/trakt/app/core/home/sections/social/usecases/GetSocialActivityUseCase.kt
+tv/src/main/java/tv/trakt/trakt/app/core/plex/data/PlexTimelineClient.kt
+tv/src/main/java/tv/trakt/trakt/app/core/profile/usecases/LogoutProfileUseCase.kt
+tv/src/main/java/tv/trakt/trakt/app/core/scrobble/data/work/PostScrobbleStartWorker.kt
+tv/src/main/java/tv/trakt/trakt/app/core/scrobble/data/work/PostScrobbleStopWorker.kt
+
+
+===== AGENTS.md =====
+Before implementing anything, identify which domain you are working in and
+read the matching rule file from `.agents/rules/` with the Read tool. Only the
+baseline below loads automatically; domain rules load on demand so every
+session does not pay for all of them.
+
+- Do not spawn subagents unless explicitly requested.
+- Max subagents per task: 1.
+- Do not recurse into deeper agents (depth = 0).
+
+Domain rules (read every file whose area or paths the task touches). Claude
+Code also loads them automatically through `.claude/rules/` when it reads a
+file matching a rule's `paths` header, but that only covers file paths, not
+areas such as `analytics.*` calls, so still read by area:
+
+- Any Kotlin file (`**/*.kt`): layers, repositories, DI, navigation,
+  background sync: `architecture.md`
+- Kotlin under `app/`, `tv/` or `common/` `src/main/`: Compose-side state:
+  `state-management.md`
+- Compose UI in any module (any `@Composable`: screens, `views/`,
+  `components/`, `**/ui/**/*.kt`, TV screens): `theming.md`,
+  `localization.md`
+- Theme code (`**/theme/**/*.kt`, `*Theme.kt`): `theming.md`
+- ViewModels and screen state types (`*ViewModel.kt`, `*State.kt`):
+  `viewmodel.md`
+- `common/src/main/**/*.kt`: Ktor client, OpenAPI mappers, DataStore, Room,
+  file caches: `networking.md`, `persistence.md`
+- Repositories, DataStore, local sources and caches in any module (`app/`,
+  `tv/`, feature `data/` folders): `networking.md`, `persistence.md`
+- Koin modules that bind local sources or DataStores (feature `di/`
+  folders, `TraktApplication`, `TvActivity`): `persistence.md`
+- OpenAPI spec and generated client (`openapi/openapi.json`,
+  `build/generate-resources/`, `./gradlew openApiGenerate`): `networking.md`
+- Strings and resources (`resources/src/main/res/**`, `strings.xml`,
+  `ValidateStringPlaceholdersTask`): `localization.md`
+- Gradle (`build.gradle.kts`, `settings.gradle.kts`,
+  `gradle/libs.versions.toml`, `buildSrc/`, `build-logic/`), new external
+  deps: `packages.md`
+- Analytics events, screen views, the `Analytics` interface and backends
+  (`common/.../firebase/analytics/`, any `analytics.*` call): `analytics.md`
+
+Re-read a domain file after a long gap if the context was compacted.
+
+Always-on baseline (all source code, every commit and PR):
+
+@.agents/rules/project.md
+
+@.agents/rules/code-principles.md
+
+@.agents/rules/implementation.md
+
+@.agents/rules/commits.md
+
+
+===== CLAUDE.md =====
+Before implementing anything, identify which domain you are working in and
+read the matching rule file from `.agents/rules/` with the Read tool. Only the
+baseline below loads automatically; domain rules load on demand so every
+session does not pay for all of them.
+
+- Do not spawn subagents unless explicitly requested.
+- Max subagents per task: 1.
+- Do not recurse into deeper agents (depth = 0).
+
+Domain rules (read every file whose area or paths the task touches). Claude
+Code also loads them automatically through `.claude/rules/` when it reads a
+file matching a rule's `paths` header, but that only covers file paths, not
+areas such as `analytics.*` calls, so still read by area:
+
+- Any Kotlin file (`**/*.kt`): layers, repositories, DI, navigation,
+  background sync: `architecture.md`
+- Kotlin under `app/`, `tv/` or `common/` `src/main/`: Compose-side state:
+  `state-management.md`
+- Compose UI in any module (any `@Composable`: screens, `views/`,
+  `components/`, `**/ui/**/*.kt`, TV screens): `theming.md`,
+  `localization.md`
+- Theme code (`**/theme/**/*.kt`, `*Theme.kt`): `theming.md`
+- ViewModels and screen state types (`*ViewModel.kt`, `*State.kt`):
+  `viewmodel.md`
+- `common/src/main/**/*.kt`: Ktor client, OpenAPI mappers, DataStore, Room,
+  file caches: `networking.md`, `persistence.md`
+- Repositories, DataStore, local sources and caches in any module (`app/`,
+  `tv/`, feature `data/` folders): `networking.md`, `persistence.md`
+- Koin modules that bind local sources or DataStores (feature `di/`
+  folders, `TraktApplication`, `TvActivity`): `persistence.md`
+- OpenAPI spec and generated client (`openapi/openapi.json`,
+  `build/generate-resources/`, `./gradlew openApiGenerate`): `networking.md`
+- Strings and resources (`resources/src/main/res/**`, `strings.xml`,
+  `ValidateStringPlaceholdersTask`): `localization.md`
+- Gradle (`build.gradle.kts`, `settings.gradle.kts`,
+  `gradle/libs.versions.toml`, `buildSrc/`, `build-logic/`), new external
+  deps: `packages.md`
+- Analytics events, screen views, the `Analytics` interface and backends
+  (`common/.../firebase/analytics/`, any `analytics.*` call): `analytics.md`
+
+Re-read a domain file after a long gap if the context was compacted.
+
+Always-on baseline (all source code, every commit and PR):
+
+@.agents/rules/project.md
+
+@.agents/rules/code-principles.md
+
+@.agents/rules/implementation.md
+
+@.agents/rules/commits.md
+
+
+===== AndroidManifest (app) deep links =====
+66:      <intent-filter>
+69:      </intent-filter>
+71:      <intent-filter>
+78:          android:host="auth"
+79:          android:scheme="trakt"
+81:      </intent-filter>
+83:      <intent-filter android:autoVerify="true">
+89:        <data android:scheme="https" />
+90:        <data android:host="app.trakt.tv" />
+117:      </intent-filter>
+119:      <intent-filter android:autoVerify="true">
+125:        <data android:scheme="https" />
+126:        <data android:host="app.trakt.tv" />
+128:      </intent-filter>
+130:      <intent-filter android:label="@string/button_search_selection">
+136:      </intent-filter>
+138:      <intent-filter>
+144:        <data android:scheme="http" />
+145:        <data android:scheme="https" />
+146:        <data android:host="imdb.com" />
+147:        <data android:host="www.imdb.com" />
+148:        <data android:host="m.imdb.com" />
+155:      </intent-filter>
+168:      <intent-filter>
+171:      </intent-filter>
+189:      <intent-filter>
+191:      </intent-filter>
+200:      <intent-filter>
+202:      </intent-filter>
+216:      <intent-filter>
+218:      </intent-filter>
+232:      <intent-filter>
+234:      </intent-filter>
+285:    <package android:name="tv.wuaki" />
+291:    <package android:name="tv.fubo.mobile" />
+297:    <package android:name="tv.pluto.android" />

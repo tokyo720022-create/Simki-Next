@@ -1,0 +1,295 @@
+@file:OptIn(FlowPreview::class)
+
+package tv.trakt.trakt.core.lists.sections.watchlist
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import timber.log.Timber
+import tv.trakt.trakt.common.auth.session.SessionManager
+import tv.trakt.trakt.common.core.lists.model.WatchlistItem
+import tv.trakt.trakt.common.core.sync.changes.DataChange.Kind
+import tv.trakt.trakt.common.core.sync.changes.DataChanges
+import tv.trakt.trakt.common.core.user.CollectionStateProvider
+import tv.trakt.trakt.common.core.user.UserCollectionState
+import tv.trakt.trakt.common.data.local.MovieLocalSource
+import tv.trakt.trakt.common.data.local.ShowLocalSource
+import tv.trakt.trakt.common.helpers.LoadingState
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.LoadingState.Loading
+import tv.trakt.trakt.common.helpers.extensions.recordError
+import tv.trakt.trakt.common.helpers.extensions.rethrowCancellation
+import tv.trakt.trakt.common.helpers.lifecycle.AppLifecycleProvider
+import tv.trakt.trakt.common.helpers.lifecycle.observeForegroundRefresh
+import tv.trakt.trakt.common.model.MediaMode.Media
+import tv.trakt.trakt.common.model.MediaMode.Movies
+import tv.trakt.trakt.common.model.MediaMode.Shows
+import tv.trakt.trakt.common.model.Movie
+import tv.trakt.trakt.common.model.Show
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.common.model.globalfilter.GlobalFilter
+import tv.trakt.trakt.common.model.sorting.Sorting
+import tv.trakt.trakt.core.filters.data.GlobalFilterManager
+import tv.trakt.trakt.core.lists.ListsConfig.WATCHLIST_SECTION_LIMIT
+import tv.trakt.trakt.core.lists.sections.watchlist.usecases.GetMoviesWatchlistUseCase
+import tv.trakt.trakt.core.lists.sections.watchlist.usecases.GetShowsWatchlistUseCase
+import tv.trakt.trakt.core.lists.sections.watchlist.usecases.GetWatchlistUseCase
+import tv.trakt.trakt.helpers.collapsing.CollapsingManager
+import tv.trakt.trakt.helpers.collapsing.model.CollapsingKey
+
+internal class ListsWatchlistViewModel(
+    private val filterManager: GlobalFilterManager,
+    private val getWatchlistUseCase: GetWatchlistUseCase,
+    private val getShowsWatchlistUseCase: GetShowsWatchlistUseCase,
+    private val getMoviesWatchlistUseCase: GetMoviesWatchlistUseCase,
+    private val showLocalSource: ShowLocalSource,
+    private val movieLocalSource: MovieLocalSource,
+    private val dataChanges: DataChanges,
+    private val collectionStateProvider: CollectionStateProvider,
+    private val sessionManager: SessionManager,
+    private val collapsingManager: CollapsingManager,
+    private val appLifecycleProvider: AppLifecycleProvider,
+) : ViewModel() {
+    private val initialState = ListsWatchlistState()
+
+    private val userState = MutableStateFlow(initialState.user)
+    private val itemsState = MutableStateFlow(initialState.items)
+    private val filterState = MutableStateFlow(filterManager.getFilter())
+    private val collapseState = MutableStateFlow(isCollapsed())
+    private val navigateShow = MutableStateFlow(initialState.navigateShow)
+    private val navigateMovie = MutableStateFlow(initialState.navigateMovie)
+    private val loadingState = MutableStateFlow(initialState.loading)
+    private val errorState = MutableStateFlow(initialState.error)
+
+    private var dataJob: Job? = null
+    private var processingJob: Job? = null
+    private var collapseJob: Job? = null
+
+    init {
+        loadData()
+
+        observeFilter()
+        observeUser()
+        observeWatchlist()
+        observeCollection()
+        observeForeground()
+    }
+
+    private fun observeForeground() {
+        appLifecycleProvider.observeForegroundRefresh()
+            .onEach { loadData(ignoreErrors = true) }
+            .launchIn(viewModelScope)
+    }
+
+    private fun observeFilter() {
+        filterManager.observeFilter()
+            .onEach { value ->
+                filterState.update { value }
+                collapseState.update { isCollapsed() }
+                loadData()
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun observeUser() {
+        viewModelScope.launch {
+            userState.update { sessionManager.getProfile() }
+            sessionManager.observeProfile()
+                .drop(1)
+                .distinctUntilChanged()
+                .debounce(200)
+                .collect { user ->
+                    userState.update { user }
+                    loadData()
+                }
+        }
+    }
+
+    @OptIn(FlowPreview::class)
+    private fun observeWatchlist() {
+        dataChanges.observe(Kind.Watchlist)
+            .debounce(200)
+            .onEach {
+                loadData(ignoreErrors = true)
+            }.launchIn(viewModelScope)
+    }
+
+    private fun observeCollection() {
+        collectionStateProvider
+            .launchIn(viewModelScope)
+    }
+
+    fun loadData(ignoreErrors: Boolean = false) {
+        dataJob?.cancel()
+        dataJob = viewModelScope.launch {
+            try {
+                if (loadEmptyIfNeeded()) {
+                    return@launch
+                }
+
+                val localItems = when (filterState.value.mode) {
+                    Media -> getWatchlistUseCase.getLocalWatchlist(
+                        limit = WATCHLIST_SECTION_LIMIT,
+                        sorting = Sorting.RecentlyAdded,
+                    )
+                    Shows -> getShowsWatchlistUseCase.getLocalWatchlist(
+                        limit = WATCHLIST_SECTION_LIMIT,
+                        sort = Sorting.RecentlyAdded,
+                    )
+                    Movies -> getMoviesWatchlistUseCase.getLocalWatchlist(
+                        limit = WATCHLIST_SECTION_LIMIT,
+                        sort = Sorting.RecentlyAdded,
+                    )
+                }
+
+                if (localItems.isNotEmpty()) {
+                    itemsState.update { localItems }
+                    loadingState.update { Done }
+                } else {
+                    loadingState.update { Loading }
+                }
+
+                itemsState.update {
+                    when (filterState.value.mode) {
+                        Media -> getWatchlistUseCase.getRemoteWatchlist(
+                            page = 1,
+                            limit = WATCHLIST_SECTION_LIMIT,
+                            filters = filterState.value,
+                            sorting = Sorting.RecentlyAdded,
+                        )
+                        Shows -> getShowsWatchlistUseCase.getRemoteWatchlist(
+                            page = 1,
+                            limit = WATCHLIST_SECTION_LIMIT,
+                            filters = filterState.value,
+                            sorting = Sorting.RecentlyAdded,
+                        )
+                        Movies -> getMoviesWatchlistUseCase.getRemoteWatchlist(
+                            page = 1,
+                            limit = WATCHLIST_SECTION_LIMIT,
+                            filters = filterState.value,
+                            sorting = Sorting.RecentlyAdded,
+                        )
+                    }
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    if (!ignoreErrors) {
+                        errorState.update { error }
+                    }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingState.update { Done }
+                dataJob = null
+            }
+        }
+    }
+
+    private suspend fun loadEmptyIfNeeded(): Boolean {
+        if (!sessionManager.isAuthenticated()) {
+            itemsState.update {
+                emptyList<WatchlistItem>().toImmutableList()
+            }
+            loadingState.update { Done }
+            return true
+        }
+
+        return false
+    }
+
+    fun navigateToShow(show: Show) {
+        if (navigateShow.value != null || processingJob?.isActive == true) {
+            return
+        }
+        processingJob = viewModelScope.launch {
+            showLocalSource.upsertShows(listOf(show))
+            navigateShow.update { show.ids.trakt }
+        }
+    }
+
+    fun navigateToMovie(movie: Movie) {
+        if (navigateMovie.value != null || processingJob?.isActive == true) {
+            return
+        }
+        processingJob = viewModelScope.launch {
+            movieLocalSource.upsertMovies(listOf(movie))
+            navigateMovie.update { movie.ids.trakt }
+        }
+    }
+
+    fun clearNavigation() {
+        navigateShow.update { null }
+        navigateMovie.update { null }
+    }
+
+    fun setCollapsed(collapsed: Boolean) {
+        collapseState.update { collapsed }
+
+        collapseJob?.cancel()
+        collapseJob = viewModelScope.launch {
+            val key = when (filterState.value.mode) {
+                Media -> CollapsingKey.LISTS_MEDIA_WATCHLIST
+                Shows -> CollapsingKey.LISTS_SHOWS_WATCHLIST
+                Movies -> CollapsingKey.LISTS_MOVIES_WATCHLIST
+            }
+            when {
+                collapsed -> collapsingManager.collapse(key)
+                else -> collapsingManager.expand(key)
+            }
+        }
+    }
+
+    private fun isCollapsed(): Boolean {
+        return collapsingManager.isCollapsed(
+            key = when (filterState.value.mode) {
+                Media -> CollapsingKey.LISTS_MEDIA_WATCHLIST
+                Shows -> CollapsingKey.LISTS_SHOWS_WATCHLIST
+                Movies -> CollapsingKey.LISTS_MOVIES_WATCHLIST
+            },
+        )
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    val state = combine(
+        loadingState,
+        itemsState,
+        filterState,
+        collapseState,
+        collectionStateProvider.stateFlow,
+        navigateShow,
+        navigateMovie,
+        errorState,
+        userState,
+    ) { states ->
+        ListsWatchlistState(
+            loading = states[0] as LoadingState,
+            items = states[1] as ImmutableList<WatchlistItem>?,
+            filter = states[2] as GlobalFilter,
+            collapsed = states[3] as Boolean,
+            collection = states[4] as UserCollectionState,
+            navigateShow = states[5] as TraktId?,
+            navigateMovie = states[6] as TraktId?,
+            error = states[7] as Exception?,
+            user = states[8] as User?,
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = initialState,
+    )
+}

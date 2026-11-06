@@ -1,0 +1,60 @@
+package tv.trakt.trakt.core.search
+
+import androidx.compose.runtime.Immutable
+import kotlinx.collections.immutable.ImmutableList
+import tv.trakt.trakt.common.core.user.UserCollectionState
+import tv.trakt.trakt.common.helpers.LoadingState
+import tv.trakt.trakt.common.model.Movie
+import tv.trakt.trakt.common.model.Person
+import tv.trakt.trakt.common.model.Show
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.common.model.lists.CustomList
+import tv.trakt.trakt.core.search.features.game.isGameKeyword
+import tv.trakt.trakt.core.search.model.SearchFilter
+import tv.trakt.trakt.core.search.model.SearchInput
+import tv.trakt.trakt.core.search.model.SearchItem
+
+@Immutable
+internal data class SearchState(
+    val input: SearchInput = SearchInput(),
+    val state: State = State.IDLE,
+    val popularLoading: LoadingState = LoadingState.Idle,
+    val popularResults: SearchResult? = null,
+    val searchResult: SearchResult? = null,
+    val navigateShow: Show? = null,
+    val navigateMovie: Movie? = null,
+    val navigatePerson: Person? = null,
+    val navigateList: CustomList? = null,
+    val collection: UserCollectionState = UserCollectionState.Default,
+    val user: UserState = UserState(),
+    val searching: Boolean = false,
+    val error: Exception? = null,
+) {
+    val showGameCard: Boolean
+        get() = input.filter in GameCardFilters && isGameKeyword(input.query) && !searchResult?.items.isNullOrEmpty()
+
+    data class UserState(
+        val user: User? = null,
+        val loading: LoadingState = LoadingState.Idle,
+    ) {
+        val isAuthenticated: Boolean
+            get() = user != null
+    }
+
+    data class SearchResult(
+        val items: ImmutableList<SearchItem>? = null,
+    )
+
+    private companion object {
+        val GameCardFilters = setOf(
+            SearchFilter.MEDIA,
+            SearchFilter.SHOWS,
+            SearchFilter.MOVIES,
+        )
+    }
+
+    enum class State {
+        IDLE,
+        LOADING,
+    }
+}

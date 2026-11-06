@@ -1,0 +1,57 @@
+package tv.trakt.trakt.core.search.usecase
+
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
+import tv.trakt.trakt.common.data.remote.PeopleRemoteSource
+import tv.trakt.trakt.common.helpers.extensions.asyncMap
+import tv.trakt.trakt.common.helpers.extensions.nowLocalDay
+import tv.trakt.trakt.common.helpers.extensions.nowUtc
+import tv.trakt.trakt.common.model.Person
+import tv.trakt.trakt.common.model.fromDto
+import tv.trakt.trakt.core.search.data.local.people.SearchPeopleLocalSource
+
+internal class GetBirthdayPeopleUseCase(
+    private val remoteSource: PeopleRemoteSource,
+    private val localSource: SearchPeopleLocalSource,
+) {
+    suspend fun isLocalPeopleValid(): Boolean {
+        val currentMonth = nowUtc().monthValue
+
+        val peopleMonth = getLocalPeople()
+            .firstOrNull()
+            ?.birthday?.monthValue
+
+        return peopleMonth == currentMonth
+    }
+
+    suspend fun getLocalPeople(): ImmutableList<Person> {
+        val today = nowLocalDay()
+        return localSource.getPeople()
+            .sortedWith(
+                compareByDescending<Person> {
+                    it.birthday?.monthValue == today.monthValue &&
+                        it.birthday?.dayOfMonth == today.dayOfMonth
+                }.thenBy { it.birthday?.dayOfYear },
+            )
+            .toImmutableList()
+    }
+
+    suspend fun getPeople(limit: Int = 36): ImmutableList<Person> {
+        val today = nowLocalDay()
+        return remoteSource.getBirthdayPeople()
+            .asyncMap {
+                Person.fromDto(it)
+            }
+            .take(limit)
+            .sortedWith(
+                compareByDescending<Person> {
+                    it.birthday?.monthValue == today.monthValue &&
+                        it.birthday?.dayOfMonth == today.dayOfMonth
+                }.thenBy { it.birthday?.dayOfYear },
+            )
+            .toImmutableList()
+            .also { people ->
+                localSource.setPeople(people = people)
+            }
+    }
+}

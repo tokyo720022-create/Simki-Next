@@ -1,0 +1,468 @@
+@file:OptIn(ExperimentalCoilApi::class)
+
+package tv.trakt.trakt.ui.components.mediacards.list
+
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CardDefaults.cardColors
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RadialGradientShader
+import androidx.compose.ui.graphics.Shader
+import androidx.compose.ui.graphics.ShaderBrush
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil3.ColorImage
+import coil3.annotation.ExperimentalCoilApi
+import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePreviewHandler
+import coil3.compose.LocalAsyncImagePreviewHandler
+import kotlinx.collections.immutable.toImmutableList
+import tv.trakt.trakt.common.helpers.extensions.DevicePreview
+import tv.trakt.trakt.common.helpers.extensions.DevicePreviewRtl
+import tv.trakt.trakt.common.helpers.extensions.onClick
+import tv.trakt.trakt.common.helpers.extensions.rememberThousandsFormat
+import tv.trakt.trakt.common.helpers.preview.PreviewData
+import tv.trakt.trakt.common.model.Images
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.common.model.lists.CustomList
+import tv.trakt.trakt.common.model.lists.CustomList.Type
+import tv.trakt.trakt.helpers.extensions.TraktThemeLightDark
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.lists.ListAuthorSubtitle
+import tv.trakt.trakt.ui.components.lists.ListPrivacySubtitle
+import tv.trakt.trakt.ui.components.mediacards.VerticalMediaCard
+import tv.trakt.trakt.ui.theme.DefaultCardShape
+import tv.trakt.trakt.ui.theme.HorizontalImageAspectRatio
+import tv.trakt.trakt.ui.theme.TraktTheme
+import tv.trakt.trakt.ui.theme.VerticalImageAspectRatio
+
+@Composable
+internal fun CustomListCard(
+    list: CustomList,
+    modifier: Modifier = Modifier,
+    liked: Boolean = false,
+    likesVisible: Boolean = false,
+    moreVisible: Boolean = false,
+    userVisible: Boolean = true,
+    privacyVisible: Boolean = false,
+    onClick: () -> Unit,
+    onMoreClick: () -> Unit = {},
+    onUserClick: ((User) -> Unit)? = null,
+) {
+    Card(
+        onClick = onClick,
+        modifier = modifier,
+        shape = DefaultCardShape,
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = TraktTheme.colors.shadowDynamicDefault,
+            pressedElevation = TraktTheme.colors.shadowDynamicDefault,
+            disabledElevation = TraktTheme.colors.shadowDynamicDefault,
+        ),
+        colors = cardColors(
+            containerColor = TraktTheme.colors.customListContainer,
+        ),
+        content = {
+            CustomListContent(
+                list = list,
+                liked = liked,
+                likesVisible = likesVisible,
+                userVisible = userVisible,
+                privacyVisible = privacyVisible,
+                moreVisible = moreVisible,
+                onClick = onClick,
+                onMoreClick = onMoreClick,
+                onUserClick = onUserClick,
+            )
+        },
+    )
+}
+
+@Composable
+private fun CustomListContent(
+    list: CustomList,
+    liked: Boolean,
+    likesVisible: Boolean,
+    moreVisible: Boolean,
+    userVisible: Boolean,
+    privacyVisible: Boolean,
+    onClick: () -> Unit,
+    onMoreClick: () -> Unit,
+    onUserClick: ((User) -> Unit)?,
+) {
+    val containerColor = TraktTheme.colors.customListContainer
+    val gradientColor = TraktTheme.colors.customListGradient
+
+    val radialGradient = remember {
+        object : ShaderBrush() {
+            override fun createShader(size: Size): Shader {
+                return RadialGradientShader(
+                    colors = listOf(
+                        gradientColor,
+                        containerColor,
+                    ),
+                    center = Offset(size.width / 4, size.height * 1.5F),
+                    radius = size.width * 1.2F,
+                )
+            }
+        }
+    }
+
+    val images = remember(list.images?.posters) {
+        list.images?.getPostersUrl()?.take(8)
+    }
+
+    Column(
+        verticalArrangement = spacedBy(0.dp, Alignment.CenterVertically),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                brush = when {
+                    list.type == Type.Official -> radialGradient
+                    else -> SolidColor(containerColor)
+                },
+                shape = DefaultCardShape,
+            )
+            .padding(vertical = 16.dp),
+    ) {
+        CustomListHeader(
+            list = list,
+            liked = liked,
+            likesVisible = likesVisible,
+            userVisible = userVisible,
+            privacyVisible = privacyVisible,
+            moreVisible = moreVisible,
+            onMoreClick = onMoreClick,
+            onUserClick = onUserClick,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+
+        if (!images.isNullOrEmpty()) {
+            BoxWithConstraints(
+                modifier = Modifier
+                    .weight(1f)
+                    .onClick(onClick = onClick)
+                    .fillMaxWidth()
+                    .padding(
+                        top = 16.dp,
+                        start = 16.dp,
+                        end = 16.dp,
+                    ),
+            ) {
+                val availableHeight = maxHeight
+                val availableWidth = maxWidth
+                val cardWidth = availableHeight * VerticalImageAspectRatio
+                val imageCount = images.size
+
+                val offset = when {
+                    imageCount <= 1 -> 0.dp
+                    imageCount <= 4 -> cardWidth * 0.66f
+                    else -> (availableWidth - cardWidth) / (imageCount - 1)
+                }
+
+                images.forEachIndexed { index, url ->
+                    VerticalMediaCard(
+                        title = "",
+                        imageUrl = url,
+                        width = cardWidth,
+                        corner = 12.dp,
+                        enabled = false,
+                        more = false,
+                        modifier = Modifier
+                            .padding(start = offset * index),
+                    )
+                }
+            }
+        } else {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .padding(
+                        top = 16.dp,
+                        start = 16.dp,
+                        end = 16.dp,
+                    )
+                    .shadow(
+                        elevation = TraktTheme.colors.shadowDynamicSmall,
+                        shape = RoundedCornerShape(17.dp),
+                    )
+                    .background(
+                        color = when {
+                            list.type == Type.Official -> TraktTheme.colors.customListGradient
+                            else -> TraktTheme.colors.dialogOnContainer
+                        },
+                        shape = RoundedCornerShape(17.dp),
+                    )
+                    .fillMaxSize(),
+            ) {
+                Text(
+                    text = stringResource(R.string.list_placeholder_empty),
+                    color = when {
+                        list.type == Type.Official -> Color.White
+                        else -> TraktTheme.colors.textSecondary
+                    },
+                    style = TraktTheme.typography.heading6,
+                    modifier = Modifier.padding(24.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CustomListHeader(
+    list: CustomList,
+    liked: Boolean,
+    likesVisible: Boolean,
+    userVisible: Boolean,
+    privacyVisible: Boolean,
+    moreVisible: Boolean,
+    onMoreClick: () -> Unit,
+    onUserClick: ((User) -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1F, false),
+        ) {
+            if (userVisible) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .onClick { onUserClick?.invoke(list.user) },
+                ) {
+                    val avatarBorder = if (list.user.isAnyVip) TraktTheme.colors.vipAccent else Color.Transparent
+                    val avatar = list.user.images?.avatar?.full
+                    if (avatar != null) {
+                        AsyncImage(
+                            model = avatar,
+                            contentDescription = "User avatar",
+                            contentScale = ContentScale.Crop,
+                            error = painterResource(R.drawable.ic_person_placeholder),
+                            modifier =
+                                Modifier
+                                    .border(2.dp, avatarBorder, CircleShape)
+                                    .clip(CircleShape),
+                        )
+                    } else {
+                        Image(
+                            painter = painterResource(R.drawable.ic_person_placeholder),
+                            contentDescription = null,
+                            modifier =
+                                Modifier
+                                    .border(2.dp, avatarBorder, CircleShape)
+                                    .clip(CircleShape),
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.size(8.dp))
+            }
+
+            Column(
+                verticalArrangement = spacedBy(2.dp),
+            ) {
+                Text(
+                    text = list.name,
+                    style = TraktTheme.typography.cardTitle.copy(fontSize = 16.sp, letterSpacing = 0.1.sp),
+                    color = TraktTheme.colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                if (privacyVisible) {
+                    ListPrivacySubtitle(
+                        privacy = list.privacy,
+                        itemCount = list.itemCount,
+                    )
+                } else {
+                    ListAuthorSubtitle(
+                        user = list.user,
+                        itemCount = list.itemCount,
+                        onUserClick = onUserClick,
+                    )
+                }
+            }
+        }
+
+        if (likesVisible) {
+            Spacer(modifier = Modifier.size(8.dp))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = spacedBy(4.dp),
+                modifier = Modifier
+                    .padding(start = 16.dp)
+                    .onClick(onClick = { }),
+            ) {
+                Icon(
+                    painter = painterResource(
+                        when {
+                            liked -> R.drawable.ic_thumb_up_fill
+                            else -> R.drawable.ic_thumb_up_like
+                        },
+                    ),
+                    contentDescription = null,
+                    tint = TraktTheme.colors.textSecondary,
+                    modifier = Modifier
+                        .size(16.dp),
+                )
+                list.likes?.let {
+                    Text(
+                        text = rememberThousandsFormat(it),
+                        style = TraktTheme.typography.meta,
+                        color = TraktTheme.colors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+
+        if (moreVisible) {
+            Spacer(modifier = Modifier.size(8.dp))
+
+            Icon(
+                painter = painterResource(R.drawable.ic_more_vertical),
+                contentDescription = null,
+                tint = TraktTheme.colors.textPrimary,
+                modifier = Modifier
+                    .padding(start = 12.dp)
+                    .size(16.dp)
+                    .onClick(onClick = onMoreClick),
+            )
+        }
+    }
+}
+
+@DevicePreview
+@Composable
+private fun Preview() {
+    val previewHandler = AsyncImagePreviewHandler { ColorImage(Color.LightGray.toArgb()) }
+    TraktThemeLightDark {
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            Column(
+                verticalArrangement = spacedBy(16.dp),
+            ) {
+                CustomListCard(
+                    list = PreviewData.customList1.copy(
+                        name = "A very long list name that should be truncated",
+                        likes = 12341,
+                        type = Type.Official,
+                    ),
+                    liked = true,
+                    likesVisible = true,
+                    moreVisible = true,
+                    modifier = Modifier
+                        .aspectRatio(HorizontalImageAspectRatio),
+                    onClick = {},
+                )
+
+                CustomListCard(
+                    list = PreviewData.customList1.copy(
+                        privacy = CustomList.Privacy.Private,
+                    ),
+                    moreVisible = true,
+                    privacyVisible = true,
+                    modifier = Modifier
+                        .aspectRatio(HorizontalImageAspectRatio),
+                    onClick = {},
+                )
+            }
+        }
+    }
+}
+
+@DevicePreview
+@DevicePreviewRtl
+@Composable
+private fun PreviewRtl() {
+    val previewHandler = AsyncImagePreviewHandler { ColorImage(Color.LightGray.toArgb()) }
+    TraktThemeLightDark {
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            Column(
+                verticalArrangement = spacedBy(16.dp),
+            ) {
+                CustomListCard(
+                    list = PreviewData.customList1.copy(
+                        name = "A very long list name that should be truncated",
+                        likes = 12341,
+                        type = Type.All,
+                    ),
+                    liked = true,
+                    likesVisible = true,
+                    moreVisible = true,
+                    modifier = Modifier
+                        .aspectRatio(HorizontalImageAspectRatio),
+                    onClick = {},
+                )
+            }
+        }
+    }
+}
+
+@DevicePreview
+@Composable
+private fun Preview2() {
+    val previewHandler = AsyncImagePreviewHandler { ColorImage(Color.LightGray.toArgb()) }
+    TraktThemeLightDark {
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            Column(
+                verticalArrangement = spacedBy(16.dp),
+            ) {
+                CustomListCard(
+                    list = PreviewData.customList1.copy(
+                        type = Type.All,
+                        images = Images(
+                            posters = listOf(
+                                "https://trakt.tv/images/posters/000/000/001/thumb/1.jpg",
+                                "https://trakt.tv/images/posters/000/000/001/thumb/1.jpg",
+                                "https://trakt.tv/images/posters/000/000/001/thumb/1.jpg",
+                            ).toImmutableList(),
+                        ),
+                    ),
+                    modifier = Modifier
+                        .aspectRatio(HorizontalImageAspectRatio),
+                    onClick = {},
+                )
+            }
+        }
+    }
+}

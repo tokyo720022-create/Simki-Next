@@ -1,0 +1,893 @@
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+
+package tv.trakt.trakt.core.summary.movies
+
+import android.content.Context
+import android.content.Intent
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Text
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Alignment.Companion.Center
+import androidx.compose.ui.Alignment.Companion.TopCenter
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType.Companion.Confirm
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow.Companion.Ellipsis
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import org.koin.androidx.compose.koinViewModel
+import org.koin.core.parameter.parametersOf
+import tv.trakt.trakt.LocalRatePromptVisibility
+import tv.trakt.trakt.LocalSnackbarState
+import tv.trakt.trakt.common.Config.WEB_V3_BASE_URL
+import tv.trakt.trakt.common.helpers.DynamicStringResource
+import tv.trakt.trakt.common.helpers.LoadingState
+import tv.trakt.trakt.common.helpers.extensions.ifOrElse
+import tv.trakt.trakt.common.helpers.extensions.onClick
+import tv.trakt.trakt.common.helpers.extensions.toShareUrl
+import tv.trakt.trakt.common.helpers.preview.PreviewData
+import tv.trakt.trakt.common.model.ExtraVideo
+import tv.trakt.trakt.common.model.Images
+import tv.trakt.trakt.common.model.MediaType
+import tv.trakt.trakt.common.model.Movie
+import tv.trakt.trakt.common.model.Person
+import tv.trakt.trakt.common.model.Sentiments
+import tv.trakt.trakt.common.model.SlugId
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.common.model.lists.CustomList
+import tv.trakt.trakt.common.model.ratings.UserRating
+import tv.trakt.trakt.common.model.reactions.MediaReactionsTarget
+import tv.trakt.trakt.core.comments.model.CommentsFilter
+import tv.trakt.trakt.core.lists.features.manage.ManageListsSheet
+import tv.trakt.trakt.core.lists.features.manage.ManageListsTarget
+import tv.trakt.trakt.core.ratings.ui.UserRatingBar
+import tv.trakt.trakt.core.report.ReportSheet
+import tv.trakt.trakt.core.report.model.ReportTarget
+import tv.trakt.trakt.core.settings.features.cover.CoverImageSheet
+import tv.trakt.trakt.core.share.ShareSheet
+import tv.trakt.trakt.core.summary.movies.features.actors.MovieActorsView
+import tv.trakt.trakt.core.summary.movies.features.comments.MovieCommentsView
+import tv.trakt.trakt.core.summary.movies.features.context.more.MovieDetailsContextSheet
+import tv.trakt.trakt.core.summary.movies.features.extras.MovieExtrasView
+import tv.trakt.trakt.core.summary.movies.features.info.MovieInfoSheet
+import tv.trakt.trakt.core.summary.movies.features.lists.MovieListsView
+import tv.trakt.trakt.core.summary.movies.features.related.MovieRelatedView
+import tv.trakt.trakt.core.summary.movies.features.sentiment.MovieSentimentView
+import tv.trakt.trakt.core.summary.movies.features.streaming.MovieStreamingsView
+import tv.trakt.trakt.core.summary.movies.features.trivia.MovieTriviaView
+import tv.trakt.trakt.core.summary.people.model.PersonCreditsRole
+import tv.trakt.trakt.core.summary.social.MediaSocialActivitySheet
+import tv.trakt.trakt.core.summary.social.model.MediaSocialActivity
+import tv.trakt.trakt.core.summary.ui.DetailsActions
+import tv.trakt.trakt.core.summary.ui.DetailsBackground
+import tv.trakt.trakt.core.summary.ui.DetailsSocialRow
+import tv.trakt.trakt.core.summary.ui.header.DetailsHeader
+import tv.trakt.trakt.helpers.SimpleScrollConnection
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.confirmation.RemoveConfirmationSheet
+import tv.trakt.trakt.ui.components.dateselection.DateSelectionSheet
+import tv.trakt.trakt.ui.components.vip.VipBanner
+import tv.trakt.trakt.ui.components.vip.onUpsellSeen
+import tv.trakt.trakt.ui.extensions.isAtLeastMedium
+import tv.trakt.trakt.ui.snackbar.ShortSnackDuration
+import tv.trakt.trakt.ui.theme.TraktTheme
+
+@Composable
+internal fun MovieDetailsScreen(
+    modifier: Modifier = Modifier,
+    viewModel: MovieDetailsViewModel,
+    onMovieClick: ((Movie) -> Unit),
+    onCommentsClick: ((Movie, CommentsFilter) -> Unit),
+    onListClick: ((Movie, CustomList) -> Unit),
+    onPersonClick: ((Movie, Person, PersonCreditsRole) -> Unit),
+    onTriviaClick: (Movie) -> Unit,
+    onPersonLinkClick: ((Movie, SlugId) -> Unit)? = null,
+    onSentimentClick: ((Movie, Sentiments) -> Unit)? = null,
+    onTrailerClick: (String) -> Unit,
+    onExtraClick: (ExtraVideo) -> Unit,
+    onNavigateToHistory: (Movie, watched: Int) -> Unit,
+    onNavigateToAllStreamings: (Movie) -> Unit,
+    onNavigateToAllCredits: (Movie) -> Unit,
+    onNavigateToUser: ((User) -> Unit)? = null,
+    onNavigateToWatchlist: () -> Unit,
+    onNavigateVip: () -> Unit,
+    onNavigateBack: () -> Unit,
+) {
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    val snack = LocalSnackbarState.current
+    val localRateVisibility = LocalRatePromptVisibility.current
+
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    val scope = rememberCoroutineScope()
+    var detailsSheet by remember { mutableStateOf<Movie?>(null) }
+    var contextSheet by remember { mutableStateOf<Movie?>(null) }
+    var listsSheet by remember { mutableStateOf<Movie?>(null) }
+    var confirmRemoveWatchedSheet by remember { mutableStateOf(false) }
+    var confirmRemoveWatchlistSheet by remember { mutableStateOf(false) }
+    var dateSheet by remember { mutableStateOf(false) }
+    var shareSheet by remember { mutableStateOf(false) }
+    var coverImageSheet by remember { mutableStateOf<Movie?>(null) }
+    var reportSheet by remember { mutableStateOf<ReportTarget?>(null) }
+    var socialActivitySheet by remember { mutableStateOf<ImmutableList<MediaSocialActivity>?>(null) }
+
+    DisposableEffect(Unit) {
+        localRateVisibility.value = false
+
+        onDispose {
+            localRateVisibility.value = true
+        }
+    }
+
+    MovieDetailsContent(
+        state = state,
+        modifier = modifier,
+        onMovieClick = onMovieClick,
+        onInfoClick = {
+            state.movie?.let {
+                detailsSheet = it
+            }
+        },
+        onPersonClick = { person, role ->
+            state.movie?.let { movie ->
+                onPersonClick(movie, person, role)
+            }
+        },
+        onListClick = {
+            state.movie?.let { movie ->
+                onListClick(movie, it)
+            }
+        },
+        onTrackClick = {
+            if ((state.movieProgress?.plays ?: 0) > 0) {
+                confirmRemoveWatchedSheet = true
+            } else {
+                dateSheet = true
+            }
+        },
+        onShareClick = {
+            state.movie?.let {
+                viewModel.logShare()
+                shareMovie(it, state.user?.settings?.shareCode, context)
+            }
+        },
+        onShareImageClick = {
+            state.movie?.let { shareSheet = true }
+        },
+        onSocialActivityClick = {
+            state.movieSocials?.let {
+                socialActivitySheet = it
+            }
+        },
+        onTrailerClick = {
+            state.movie?.trailer?.let { url ->
+                viewModel.logTrailer()
+                onTrailerClick(url)
+            }
+        },
+        onLightsaberToggle = viewModel::logLightsaber,
+        onExtraClick = { extra ->
+            viewModel.logExtra(extra)
+            onExtraClick(extra)
+        },
+        onWatchlistClick = {
+            if (state.movieProgress?.inWatchlist == true) {
+                confirmRemoveWatchlistSheet = true
+            } else {
+                viewModel.toggleWatchlist()
+            }
+        },
+        onListsClick = { listsSheet = state.movie },
+        onMoreClick = { contextSheet = state.movie },
+        onMoreCommentsClick = { filter ->
+            state.movie?.let {
+                onCommentsClick(it, filter)
+            }
+        },
+        onWatchedClick = {
+            state.movie?.let {
+                onNavigateToHistory(it, state.movieProgress?.plays ?: 0)
+            }
+        },
+        onRatingClick = {
+            viewModel.addRating(it)
+            haptic.performHapticFeedback(Confirm)
+        },
+        onRatingRemoveClick = {
+            viewModel.removeRating()
+            haptic.performHapticFeedback(Confirm)
+        },
+        onFavoriteClick = {
+            viewModel.toggleFavorite(
+                state.movieUserRating?.rating?.favorite != true,
+            )
+        },
+        onNavigateToUser = onNavigateToUser,
+        onVipClick = onNavigateVip,
+        onVipSeen = viewModel::onVipUpsellSeen,
+        onTriviaClick = {
+            state.movie?.let { movie ->
+                onTriviaClick(movie)
+            }
+        },
+        onPersonLinkClick = { slug ->
+            state.movie?.let { movie ->
+                onPersonLinkClick?.invoke(movie, slug)
+            }
+        },
+        onSentimentClick = { sentiments ->
+            state.movie?.let { movie ->
+                onSentimentClick?.invoke(movie, sentiments)
+            }
+        },
+        onAllStreamingsClick = {
+            state.movie?.let { movie ->
+                onNavigateToAllStreamings(movie)
+            }
+        },
+        onAllCreditsClick = {
+            state.movie?.let { movie ->
+                onNavigateToAllCredits(movie)
+            }
+        },
+        onBackClick = onNavigateBack,
+    )
+
+    MovieInfoSheet(
+        movie = detailsSheet,
+        onPersonClick = { person, role ->
+            state.movie?.let { movie ->
+                onPersonClick(movie, person, role)
+            }
+        },
+        onDismiss = {
+            detailsSheet = null
+        },
+    )
+
+    RemoveConfirmationSheet(
+        active = confirmRemoveWatchedSheet,
+        onYes = {
+            confirmRemoveWatchedSheet = false
+            viewModel.removeFromWatched()
+        },
+        onNo = { confirmRemoveWatchedSheet = false },
+        title = stringResource(R.string.button_text_remove_from_history),
+        message = stringResource(
+            R.string.warning_prompt_remove_from_watched,
+            state.movie?.title ?: "",
+        ),
+    )
+
+    RemoveConfirmationSheet(
+        active = confirmRemoveWatchlistSheet,
+        onYes = {
+            confirmRemoveWatchlistSheet = false
+            viewModel.toggleWatchlist()
+        },
+        onNo = { confirmRemoveWatchlistSheet = false },
+        title = stringResource(R.string.button_text_watchlist),
+        message = stringResource(
+            R.string.warning_prompt_remove_from_watchlist,
+            state.movie?.title ?: "",
+        ),
+    )
+
+    ManageListsSheet(
+        target = listsSheet?.let(ManageListsTarget::MovieTarget),
+        inWatchlist = state.movieProgress?.inWatchlist == true,
+        onWatchlistClick = {
+            viewModel.toggleWatchlist()
+        },
+        onWatchlistOpenClick = onNavigateToWatchlist,
+        onListClick = { list ->
+            state.movie?.let { movie ->
+                onListClick(movie, list)
+            }
+        },
+        onDismiss = {
+            listsSheet = null
+        },
+    )
+
+    MovieDetailsContextSheet(
+        movie = contextSheet,
+        watched = (state.movieProgress?.plays ?: 0) > 0,
+        lists = state.movieProgress?.inLists == true,
+        onHistoryClick = {
+            contextSheet = null
+            state.movie?.let {
+                onNavigateToHistory(it, state.movieProgress?.plays ?: 0)
+            }
+        },
+        onCheckClick = {
+            dateSheet = true
+        },
+        onListsClick = {
+            listsSheet = state.movie
+        },
+        onCoverClick = {
+            coverImageSheet = state.movie
+        },
+        onReportClick = {
+            reportSheet = state.movie?.let { ReportTarget.Movie(it.ids.trakt) }
+        },
+        onDismiss = {
+            contextSheet = null
+        },
+    )
+
+    DateSelectionSheet(
+        active = dateSheet,
+        title = state.movie?.title ?: "",
+        nowWatchingVisible = true,
+        onCheckIn = viewModel::addToCheckIn,
+        onResult = viewModel::addToWatched,
+        onDismiss = {
+            dateSheet = false
+        },
+    )
+
+    ReportSheet(
+        active = reportSheet != null,
+        target = reportSheet,
+        onDismiss = {
+            reportSheet = null
+        },
+    )
+
+    CoverImageSheet(
+        mediaId = coverImageSheet?.ids?.trakt,
+        mediaTitle = coverImageSheet?.title ?: "",
+        mediaType = MediaType.Movie,
+        mediaImage = state.movie?.images?.getFanartUrl(),
+        onImageSet = {
+            scope.launch {
+                val info = DynamicStringResource(R.string.text_info_cover_set)
+                snack.showSnackbar(info.get(context))
+            }
+            coverImageSheet = null
+        },
+        onDismiss = {
+            coverImageSheet = null
+        },
+    )
+
+    ShareSheet(
+        active = shareSheet,
+        mediaSlug = state.movie?.ids?.slug,
+        mediaType = MediaType.Movie,
+        onDismiss = { shareSheet = false },
+    )
+
+    MediaSocialActivitySheet(
+        activity = socialActivitySheet,
+        recommendedByPath = state.movie?.let { "/movies/${it.ids.slug.value}" },
+        mediaTitle = state.movie?.title ?: "",
+        onUserClick = {
+            onNavigateToUser?.invoke(it)
+        },
+        onDismiss = {
+            socialActivitySheet = null
+        },
+    )
+
+    LaunchedEffect(state.info) {
+        if (state.info == null) {
+            return@LaunchedEffect
+        }
+        haptic.performHapticFeedback(Confirm)
+        with(scope) {
+            val job = launch {
+                state.info?.get(context)?.let {
+                    snack.showSnackbar(it)
+                }
+            }
+            delay(ShortSnackDuration)
+            job.cancel()
+        }
+        viewModel.clearInfo()
+    }
+}
+
+@Composable
+internal fun MovieDetailsContent(
+    state: MovieDetailsState,
+    modifier: Modifier = Modifier,
+    onMovieClick: ((Movie) -> Unit)? = null,
+    onTrackClick: (() -> Unit)? = null,
+    onShareClick: (() -> Unit)? = null,
+    onShareImageClick: (() -> Unit)? = null,
+    onSocialActivityClick: (() -> Unit)? = null,
+    onInfoClick: (() -> Unit)? = null,
+    onWatchedClick: (() -> Unit)? = null,
+    onTrailerClick: (() -> Unit)? = null,
+    onLightsaberToggle: ((Boolean) -> Unit)? = null,
+    onExtraClick: ((ExtraVideo) -> Unit)? = null,
+    onWatchlistClick: (() -> Unit)? = null,
+    onListsClick: (() -> Unit)? = null,
+    onMoreClick: (() -> Unit)? = null,
+    onMoreCommentsClick: ((CommentsFilter) -> Unit)? = null,
+    onPersonClick: ((Person, PersonCreditsRole) -> Unit)? = null,
+    onListClick: ((CustomList) -> Unit)? = null,
+    onRatingClick: ((Int) -> Unit)? = null,
+    onRatingRemoveClick: (() -> Unit)? = null,
+    onFavoriteClick: (() -> Unit)? = null,
+    onNavigateToUser: ((User) -> Unit)? = null,
+    onVipClick: (() -> Unit)? = null,
+    onVipSeen: (() -> Unit)? = null,
+    onTriviaClick: (() -> Unit)? = null,
+    onPersonLinkClick: ((SlugId) -> Unit)? = null,
+    onSentimentClick: ((Sentiments) -> Unit)? = null,
+    onAllStreamingsClick: (() -> Unit)? = null,
+    onAllCreditsClick: (() -> Unit)? = null,
+    onBackClick: (() -> Unit)? = null,
+) {
+    val previewMode = LocalInspectionMode.current
+    val windowClass = currentWindowAdaptiveInfo().windowSizeClass
+
+    val contentPadding = PaddingValues(
+        top = WindowInsets.statusBars.asPaddingValues()
+            .calculateTopPadding()
+            .plus(16.dp),
+        bottom = WindowInsets.navigationBars.asPaddingValues()
+            .calculateBottomPadding()
+            .plus(TraktTheme.size.navigationBarHeight)
+            .plus(TraktTheme.spacing.mainPageBottomSpace),
+    )
+
+    val sectionPadding = PaddingValues(
+        horizontal = TraktTheme.spacing.mainPageHorizontalSpace,
+    )
+
+    val listState = rememberLazyListState(
+        cacheWindow = LazyLayoutCacheWindow(
+            aheadFraction = 0.75F,
+            behindFraction = 0.75F,
+        ),
+    )
+
+    val listScrollConnection = rememberSaveable(saver = SimpleScrollConnection.Saver) {
+        SimpleScrollConnection()
+    }
+
+    var ratingAlphaMaskActive by remember { mutableStateOf(false) }
+    val ratingAlphaMask: Float by animateFloatAsState(
+        targetValue = if (ratingAlphaMaskActive) 0.1F else 1F,
+        animationSpec = tween(150),
+        label = "alpha",
+    )
+
+    Box(
+        contentAlignment = TopCenter,
+        modifier = modifier
+            .fillMaxSize()
+            .background(TraktTheme.colors.backgroundPrimary)
+            .nestedScroll(listScrollConnection),
+    ) {
+        state.movie?.let { movie ->
+            val isReleased = remember { movie.isReleased }
+            val isWatched = remember(state.movieProgress) {
+                (state.movieProgress?.plays ?: 0) > 0
+            }
+
+            DetailsBackground(
+                imageUrl = movie.images?.getFanartUrl(Images.Size.THUMB),
+                color = movie.colors?.colors?.second,
+                translation = listScrollConnection.resultOffset,
+                modifier = Modifier.alpha(ratingAlphaMask),
+            )
+
+            LazyColumn(
+                state = listState,
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = spacedBy(0.dp),
+                contentPadding = contentPadding,
+                overscrollEffect = null,
+            ) {
+                item {
+                    DetailsHeader(
+                        movie = movie,
+                        movieTranslation = state.movieTranslation,
+                        ratings = state.movieRatings,
+                        creator = state.movieCreator,
+                        creditsCount = when {
+                            isWatched || state.loadingProgress.isLoading -> null
+                            else -> movie.postCredits.size.takeIf { it > 0 }
+                        },
+                        playsCount = state.movieProgress?.plays ?: 0,
+                        loading = state.loading.isLoading ||
+                            state.loadingProgress.isLoading,
+                        onCreatorClick = { onPersonClick?.invoke(it, PersonCreditsRole.Directing) },
+                        onBackClick = onBackClick ?: {},
+                        onShareClick = onShareClick ?: {},
+                        onShareImageClick = onShareImageClick ?: {},
+                        onInfoClick = onInfoClick ?: {},
+                        onWatchedClick = onWatchedClick ?: {},
+                        modifier = Modifier
+                            .align(Center)
+                            .alpha(ratingAlphaMask),
+                    )
+                }
+
+                item {
+                    DetailsActions(
+                        primaryEnabled = isReleased,
+                        primaryIcon = when {
+                            isWatched -> R.drawable.ic_check_double
+                            else -> R.drawable.ic_check_2
+                        },
+                        enabled = state.user != null &&
+                            !state.loadingProgress.isLoading &&
+                            !state.loadingLists.isLoading,
+                        loading = state.loadingProgress.isLoading ||
+                            state.loadingLists.isLoading,
+                        watched = isWatched,
+                        watchlist = state.movieProgress?.inWatchlist,
+                        trailer = !movie.trailer.isNullOrBlank(),
+                        lightsaber = state.lightsaber,
+                        onTrailerClick = onTrailerClick,
+                        onLightsaberToggle = onLightsaberToggle,
+                        onPrimaryClick = onTrackClick,
+                        onSecondaryClick = onWatchlistClick,
+                        onSecondaryLongClick = onListsClick,
+                        onMoreClick = onMoreClick,
+                        modifier = Modifier
+                            .alpha(
+                                when {
+                                    ratingAlphaMaskActive -> ratingAlphaMask * 0.3F
+                                    else -> ratingAlphaMask
+                                },
+                            )
+                            .padding(top = 20.dp)
+                            .ifOrElse(
+                                windowClass.isAtLeastMedium(),
+                                isTrue = Modifier.width(TraktTheme.size.detailsActionButtonsSize),
+                                isFalse = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = TraktTheme.spacing.detailsActionsHorizontalSpace),
+                            ),
+                    )
+                }
+
+                item {
+                    val isLoaded = state.movieUserRating?.loading == LoadingState.Done
+                    DetailsRating(
+                        visible = isWatched && isLoaded,
+                        rating = state.movieUserRating?.rating,
+                        loading = state.loadingFavorite.isLoading,
+                        onRatingDrag = { ratingAlphaMaskActive = it },
+                        onRatingClick = onRatingClick ?: {},
+                        onRatingRemoveClick = onRatingRemoveClick ?: {},
+                        onFavoriteClick = onFavoriteClick ?: {},
+                    )
+                }
+
+                item {
+                    DetailsSocialRow(
+                        target = MediaReactionsTarget(
+                            type = MediaType.Movie,
+                            id = movie.ids.trakt,
+                        ),
+                        recommendedByPath = "/movies/${movie.ids.slug.value}",
+                        socials = state.movieSocials,
+                        onActivityClick = {
+                            onSocialActivityClick?.invoke()
+                        },
+                        modifier = Modifier
+                            .alpha(ratingAlphaMask)
+                            .padding(horizontal = TraktTheme.spacing.mainPageHorizontalSpace),
+                    )
+                }
+
+                item {
+                    DetailsOverview(
+                        overview = movie.overview,
+                        overviewTranslation = state.movieTranslation?.overview,
+                        modifier = Modifier
+                            .alpha(ratingAlphaMask)
+                            .fillMaxWidth()
+                            .padding(top = 18.dp)
+                            .padding(horizontal = TraktTheme.spacing.mainPageHorizontalSpace),
+                    )
+                }
+
+                if (state.user != null && !state.user.isVip) {
+                    item {
+                        VipBanner(
+                            onClick = onVipClick ?: {},
+                            modifier = Modifier
+                                .onUpsellSeen { onVipSeen?.invoke() }
+                                .alpha(ratingAlphaMask)
+                                .fillMaxWidth()
+                                .padding(horizontal = TraktTheme.spacing.mainPageHorizontalSpace)
+                                .padding(top = 24.dp),
+                        )
+                    }
+                }
+
+                if (!previewMode) {
+                    val showStreamings = (state.user != null) && isReleased
+
+                    if (showStreamings) {
+                        item {
+                            MovieStreamingsView(
+                                viewModel = koinViewModel(
+                                    parameters = { parametersOf(movie) },
+                                ),
+                                headerPadding = sectionPadding,
+                                contentPadding = sectionPadding,
+                                onAllStreamingsClick = { onAllStreamingsClick?.invoke() },
+                                modifier = Modifier
+                                    .alpha(ratingAlphaMask)
+                                    .padding(top = 24.dp),
+                            )
+                        }
+                    }
+
+                    if (isReleased) {
+                        item {
+                            MovieSentimentView(
+                                viewModel = koinViewModel(
+                                    parameters = { parametersOf(movie) },
+                                ),
+                                headerPadding = sectionPadding,
+                                contentPadding = sectionPadding,
+                                onSentimentClick = { sentiments ->
+                                    onSentimentClick?.invoke(sentiments)
+                                },
+                                modifier = Modifier
+                                    .alpha(ratingAlphaMask)
+                                    .padding(
+                                        top = when {
+                                            showStreamings -> 32.dp
+                                            else -> 24.dp
+                                        } - TraktTheme.spacing.shadowClipSpace,
+                                    ),
+                            )
+                        }
+                    }
+
+                    item {
+                        MovieActorsView(
+                            viewModel = koinViewModel(
+                                parameters = { parametersOf(movie) },
+                            ),
+                            headerPadding = sectionPadding,
+                            contentPadding = sectionPadding,
+                            onPersonClick = { onPersonClick?.invoke(it, PersonCreditsRole.Acting) },
+                            onMoreClick = { onAllCreditsClick?.invoke() },
+                            modifier = Modifier
+                                .alpha(ratingAlphaMask)
+                                .padding(top = 32.dp - TraktTheme.spacing.shadowClipSpace),
+                        )
+                    }
+
+                    item {
+                        MovieCommentsView(
+                            viewModel = koinViewModel(
+                                parameters = { parametersOf(movie) },
+                            ),
+                            headerPadding = sectionPadding,
+                            contentPadding = sectionPadding,
+                            gifPaused = listState.isScrollInProgress,
+                            onMoreClick = onMoreCommentsClick,
+                            onUserClick = onNavigateToUser,
+                            modifier = Modifier
+                                .alpha(ratingAlphaMask)
+                                .padding(top = 32.dp),
+                        )
+                    }
+
+                    item {
+                        MovieExtrasView(
+                            viewModel = koinViewModel(
+                                parameters = { parametersOf(movie) },
+                            ),
+                            headerPadding = sectionPadding,
+                            contentPadding = sectionPadding,
+                            onVideoClick = onExtraClick ?: {},
+                            modifier = Modifier
+                                .alpha(ratingAlphaMask)
+                                .padding(top = 32.dp - TraktTheme.spacing.shadowClipSpace),
+                        )
+                    }
+
+                    item {
+                        MovieRelatedView(
+                            viewModel = koinViewModel(
+                                parameters = { parametersOf(movie) },
+                            ),
+                            headerPadding = sectionPadding,
+                            contentPadding = sectionPadding,
+                            onClick = onMovieClick,
+                            modifier = Modifier
+                                .alpha(ratingAlphaMask)
+                                .padding(top = 32.dp),
+                        )
+                    }
+
+                    item {
+                        MovieListsView(
+                            viewModel = koinViewModel(
+                                parameters = { parametersOf(movie) },
+                            ),
+                            headerPadding = sectionPadding,
+                            contentPadding = sectionPadding,
+                            onClick = onListClick ?: {},
+                            onUserClick = onNavigateToUser,
+                            modifier = Modifier
+                                .alpha(ratingAlphaMask)
+                                .padding(top = 32.dp),
+                        )
+                    }
+
+                    item {
+                        MovieTriviaView(
+                            viewModel = koinViewModel(
+                                parameters = { parametersOf(movie) },
+                            ),
+                            headerPadding = sectionPadding,
+                            contentPadding = sectionPadding,
+                            onVipClick = onVipClick ?: {},
+                            onTriviaClick = onTriviaClick ?: {},
+                            onPersonLinkClick = onPersonLinkClick ?: {},
+                            modifier = Modifier
+                                .alpha(ratingAlphaMask)
+                                .padding(top = 32.dp - TraktTheme.spacing.shadowClipSpace),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailsOverview(
+    modifier: Modifier = Modifier,
+    overview: String? = null,
+    overviewTranslation: String? = null,
+) {
+    var isCollapsed by remember { mutableStateOf(true) }
+
+    Crossfade(
+        targetState = overviewTranslation,
+        animationSpec = tween(250),
+        modifier = modifier
+            .fillMaxWidth()
+            .onClick { isCollapsed = !isCollapsed },
+    ) { translation ->
+        Text(
+            text = when {
+                !translation.isNullOrBlank() -> translation
+                overview.isNullOrBlank() -> stringResource(R.string.text_overview_placeholder)
+                else -> overview
+            },
+            style = TraktTheme.typography.paragraphSmall,
+            color = TraktTheme.colors.textSecondary,
+            maxLines = if (isCollapsed) 6 else Int.MAX_VALUE,
+            textAlign = TextAlign.Start,
+            overflow = Ellipsis,
+        )
+    }
+}
+
+@Composable
+fun DetailsRating(
+    modifier: Modifier = Modifier,
+    visible: Boolean,
+    rating: UserRating?,
+    loading: Boolean,
+    onRatingDrag: (Boolean) -> Unit,
+    onRatingClick: (Int) -> Unit,
+    onRatingRemoveClick: () -> Unit,
+    onFavoriteClick: () -> Unit,
+) {
+    var animated by remember { mutableStateOf(false) }
+
+    Box(
+        contentAlignment = Center,
+        modifier = modifier
+            .fillMaxWidth()
+            .ifOrElse(
+                condition = animated,
+                isTrue = Modifier,
+                isFalse = Modifier.animateContentSize(
+                    animationSpec = tween(200, delayMillis = 250),
+                ),
+            ),
+    ) {
+        if (visible) {
+            UserRatingBar(
+                rating = rating?.rating,
+                favoriteLoading = loading,
+                favoriteVisible = true,
+                favorite = rating?.favorite == true,
+                onRatingDrag = {
+                    animated = it
+                    onRatingDrag(it)
+                },
+                onRatingClick = onRatingClick,
+                onRatingRemoveClick = onRatingRemoveClick,
+                onFavoriteClick = onFavoriteClick,
+                modifier = Modifier.padding(
+                    horizontal = TraktTheme.spacing.mainPageHorizontalSpace,
+                ),
+            )
+        }
+    }
+}
+
+private fun shareMovie(
+    movie: Movie,
+    shareCode: String?,
+    context: Context,
+) {
+    val shareText = "${WEB_V3_BASE_URL}movies/${movie.ids.slug.value}".toShareUrl(shareCode)
+    val intent = Intent().apply {
+        action = Intent.ACTION_SEND
+        putExtra(Intent.EXTRA_TEXT, shareText)
+        type = "text/plain"
+    }
+
+    context.startActivity(Intent.createChooser(intent, movie.title))
+}
+
+@Preview(
+    device = "id:pixel_5",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+    locale = "us",
+)
+@Composable
+private fun Preview() {
+    TraktTheme {
+        MovieDetailsContent(
+            state = MovieDetailsState(
+                movie = PreviewData.movie1,
+            ),
+        )
+    }
+}

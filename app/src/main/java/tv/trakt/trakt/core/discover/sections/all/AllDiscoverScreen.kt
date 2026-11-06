@@ -1,0 +1,300 @@
+@file:OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+
+package tv.trakt.trakt.core.discover.sections.all
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.SnackbarDuration.Long
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment.Companion.CenterVertically
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import tv.trakt.trakt.LocalSnackbarState
+import tv.trakt.trakt.common.helpers.extensions.EmptyImmutableList
+import tv.trakt.trakt.common.helpers.extensions.onClick
+import tv.trakt.trakt.common.model.MediaMode
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.discover.DiscoverItem
+import tv.trakt.trakt.common.model.discover.DiscoverItem.MovieItem
+import tv.trakt.trakt.common.model.discover.DiscoverItem.ShowItem
+import tv.trakt.trakt.common.model.discover.DiscoverSection
+import tv.trakt.trakt.common.model.discover.DiscoverSection.Recommended
+import tv.trakt.trakt.common.model.globalfilter.GlobalFilter
+import tv.trakt.trakt.common.model.recommended.RecommendedItem
+import tv.trakt.trakt.core.discover.sections.all.AllDiscoverEvent.HideError
+import tv.trakt.trakt.core.discover.ui.AllDiscoverListView
+import tv.trakt.trakt.core.filters.GlobalFiltersSheet
+import tv.trakt.trakt.core.filters.navigation.GlobalFiltersOptions
+import tv.trakt.trakt.core.home.sections.recommended.whythis.WhyThisSheet
+import tv.trakt.trakt.core.movies.ui.context.sheet.MovieContextSheet
+import tv.trakt.trakt.core.shows.ui.context.sheet.ShowContextSheet
+import tv.trakt.trakt.helpers.SimpleScrollConnection
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.MediaFilterIcon
+import tv.trakt.trakt.ui.components.MediaModeFilters
+import tv.trakt.trakt.ui.components.ScrollableBackdropImage
+import tv.trakt.trakt.ui.theme.TraktTheme
+
+@Composable
+internal fun AllDiscoverScreen(
+    viewModel: AllDiscoverViewModel,
+    onNavigateToShow: (TraktId) -> Unit,
+    onNavigateToMovie: (TraktId) -> Unit,
+    onNavigateBack: () -> Unit,
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    val resources = LocalResources.current
+    val snackbar = LocalSnackbarState.current
+
+    var contextShowSheet by remember { mutableStateOf<ShowItem?>(null) }
+    var contextMovieSheet by remember { mutableStateOf<MovieItem?>(null) }
+    var whyThisItem by remember { mutableStateOf<RecommendedItem?>(null) }
+
+    var filtersSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        viewModel.events.collect { event ->
+            when (event) {
+                HideError -> snackbar.showSnackbar(
+                    message = resources.getString(R.string.error_text_unexpected_error_short),
+                    duration = Long,
+                )
+            }
+        }
+    }
+
+    AllDiscoverScreenContent(
+        state = state,
+        onLoadMoreData = viewModel::loadMoreData,
+        onItemClick = {
+            when (it) {
+                is ShowItem -> onNavigateToShow(it.id)
+                is MovieItem -> onNavigateToMovie(it.id)
+            }
+        },
+        onItemLongClick = {
+            if (state.loading.isLoading) {
+                return@AllDiscoverScreenContent
+            }
+            when (it) {
+                is ShowItem -> contextShowSheet = it
+                is MovieItem -> contextMovieSheet = it
+            }
+        },
+        onModeClick = { mode ->
+            state.filter?.let {
+                viewModel.setFilter(it.copy(mode = mode))
+            }
+        },
+        onFiltersClick = {
+            filtersSheet = true
+        },
+        onBackClick = onNavigateBack,
+    )
+
+    ShowContextSheet(
+        show = contextShowSheet?.show,
+        showRecommended = state.type == Recommended,
+        onHideRecommendation = { viewModel.hideRecommendation(it) },
+        onWhyThis = {
+            whyThisItem = contextShowSheet
+                ?.let { RecommendedItem.ShowItem(show = it.show, sources = it.sources) }
+        },
+        onDismiss = { contextShowSheet = null },
+    )
+
+    MovieContextSheet(
+        movie = contextMovieSheet?.movie,
+        showRecommended = state.type == Recommended,
+        onHideRecommendation = { viewModel.hideRecommendation(it) },
+        onWhyThis = {
+            whyThisItem = contextMovieSheet
+                ?.let { RecommendedItem.MovieItem(movie = it.movie, sources = it.sources) }
+        },
+        onDismiss = { contextMovieSheet = null },
+    )
+
+    WhyThisSheet(
+        item = whyThisItem,
+        onDismiss = { whyThisItem = null },
+    )
+
+    GlobalFiltersSheet(
+        active = filtersSheet,
+        options = GlobalFiltersOptions(
+            global = false,
+            initial = state.filter,
+        ),
+        onUpdate = viewModel::setFilter,
+        onDismiss = {
+            filtersSheet = false
+        },
+    )
+}
+
+@Composable
+private fun AllDiscoverScreenContent(
+    state: AllDiscoverState,
+    modifier: Modifier = Modifier,
+    onLoadMoreData: () -> Unit = {},
+    onItemClick: (DiscoverItem) -> Unit = {},
+    onItemLongClick: (DiscoverItem) -> Unit = {},
+    onModeClick: (MediaMode) -> Unit = {},
+    onFiltersClick: () -> Unit = {},
+    onBackClick: () -> Unit = {},
+) {
+    val listState = rememberLazyListState(
+        cacheWindow = LazyLayoutCacheWindow(
+            aheadFraction = 0.5F,
+            behindFraction = 0.5F,
+        ),
+    )
+
+    val listScrollConnection = rememberSaveable(saver = SimpleScrollConnection.Saver) {
+        SimpleScrollConnection()
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(TraktTheme.colors.backgroundPrimary)
+            .nestedScroll(listScrollConnection),
+    ) {
+        ScrollableBackdropImage(
+            translation = listScrollConnection.resultOffset,
+        )
+
+        AllDiscoverListView(
+            state = listState,
+            collectionState = state.collection,
+            filter = state.filter?.mode ?: MediaMode.Media,
+            items = state.items ?: EmptyImmutableList,
+            loading = state.loading.isLoading,
+            loadingMore = state.loadingMore.isLoading,
+            filtered = state.filter?.isActive == true,
+            title = {
+                Column {
+                    TitleBar(
+                        mode = state.filter?.mode,
+                        type = state.type,
+                        modifier = Modifier
+                            .padding(bottom = 2.dp)
+                            .onClick { onBackClick() },
+                    )
+
+                    if (state.filter != null) {
+                        ContentFilters(
+                            filters = state.filter,
+                            enabled = !state.loading.isLoading,
+                            onFilterClick = onModeClick,
+                            onFiltersClick = onFiltersClick,
+                        )
+                    }
+                }
+            },
+            onItemClick = onItemClick,
+            onItemLongClick = onItemLongClick,
+            onEndOfList = { onLoadMoreData() },
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+@Composable
+private fun ContentFilters(
+    filters: GlobalFilter,
+    enabled: Boolean,
+    onFilterClick: (MediaMode) -> Unit,
+    onFiltersClick: () -> Unit,
+) {
+    Row(
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 19.dp),
+    ) {
+        MediaModeFilters(
+            selected = filters.mode,
+            height = 32.dp,
+            onClick = onFilterClick,
+        )
+        MediaFilterIcon(
+            active = filters.isActive,
+            enabled = enabled,
+            onClick = onFiltersClick,
+        )
+    }
+}
+
+@Composable
+private fun TitleBar(
+    mode: MediaMode?,
+    type: DiscoverSection?,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        verticalAlignment = CenterVertically,
+        horizontalArrangement = spacedBy(12.dp),
+        modifier = modifier
+            .height(TraktTheme.size.titleBarHeight)
+            .graphicsLayer {
+                translationX = -2.dp.toPx()
+            },
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_back_arrow),
+            tint = TraktTheme.colors.textPrimary,
+            contentDescription = null,
+        )
+        if (mode != null && type != null) {
+            Text(
+                text = stringResource(type.getTitle()),
+                color = TraktTheme.colors.textPrimary,
+                style = TraktTheme.typography.heading5,
+            )
+        }
+    }
+}
+
+@Preview(
+    device = "id:pixel_6",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+)
+@Composable
+private fun Preview() {
+    TraktTheme {
+        AllDiscoverScreenContent(
+            state = AllDiscoverState(),
+        )
+    }
+}

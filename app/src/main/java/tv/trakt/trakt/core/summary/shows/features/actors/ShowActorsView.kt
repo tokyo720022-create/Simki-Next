@@ -1,0 +1,309 @@
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+
+package tv.trakt.trakt.core.summary.shows.features.actors
+
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Arrangement.spacedBy
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow.Companion.Ellipsis
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.ColorImage
+import coil3.annotation.ExperimentalCoilApi
+import coil3.compose.AsyncImagePreviewHandler
+import coil3.compose.LocalAsyncImagePreviewHandler
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.LoadingState.Idle
+import tv.trakt.trakt.common.helpers.LoadingState.Loading
+import tv.trakt.trakt.common.helpers.extensions.onClick
+import tv.trakt.trakt.common.model.CastPerson
+import tv.trakt.trakt.common.model.Person
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.TraktSectionHeader
+import tv.trakt.trakt.ui.components.chips.InfoChip
+import tv.trakt.trakt.ui.components.mediacards.VerticalMediaCard
+import tv.trakt.trakt.ui.components.mediacards.skeletons.VerticalMediaSkeletonCard
+import tv.trakt.trakt.ui.theme.TraktTheme
+import kotlin.random.Random.Default.nextInt
+
+@Composable
+internal fun ShowActorsView(
+    viewModel: ShowActorsViewModel,
+    headerPadding: PaddingValues,
+    contentPadding: PaddingValues,
+    onPersonClick: (Person) -> Unit,
+    onMoreClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    ShowActorsContent(
+        state = state,
+        modifier = modifier,
+        headerPadding = headerPadding,
+        contentPadding = contentPadding,
+        onCollapse = viewModel::setCollapsed,
+        onPersonClick = onPersonClick,
+        onMoreClick = onMoreClick,
+    )
+}
+
+@Composable
+private fun ShowActorsContent(
+    state: ShowActorsState,
+    modifier: Modifier = Modifier,
+    headerPadding: PaddingValues = PaddingValues(),
+    contentPadding: PaddingValues = PaddingValues(),
+    onCollapse: (collapsed: Boolean) -> Unit = {},
+    onPersonClick: ((Person) -> Unit)? = null,
+    onMoreClick: (() -> Unit)? = null,
+) {
+    var animateCollapse by rememberSaveable { mutableStateOf(false) }
+
+    Column(
+        verticalArrangement = spacedBy(TraktTheme.spacing.mainRowHeaderSpace),
+        modifier = modifier
+            .animateContentSize(
+                animationSpec = if (animateCollapse) spring() else snap(),
+            ),
+    ) {
+        TraktSectionHeader(
+            title = stringResource(R.string.list_title_actors),
+            collapsed = state.collapsed ?: false,
+            onCollapseClick = {
+                animateCollapse = true
+                val current = (state.collapsed ?: false)
+                onCollapse(!current)
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(headerPadding)
+                .onClick(enabled = state.loading == Done) {
+                    onMoreClick?.invoke()
+                },
+        )
+
+        if (state.collapsed != true) {
+            Crossfade(
+                targetState = state.loading,
+                animationSpec = tween(200),
+            ) { loading ->
+                when (loading) {
+                    Idle, Loading -> {
+                        ContentLoading(
+                            visible = loading.isLoading,
+                            contentPadding = contentPadding,
+                        )
+                    }
+
+                    Done -> {
+                        if (state.items?.isEmpty() == true) {
+                            ContentEmpty(
+                                contentPadding = headerPadding,
+                            )
+                        } else {
+                            ContentList(
+                                listItems = (state.items ?: emptyList()).toImmutableList(),
+                                contentPadding = contentPadding,
+                                onPersonClick = onPersonClick,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContentList(
+    listItems: ImmutableList<CastPerson>,
+    contentPadding: PaddingValues,
+    onPersonClick: ((Person) -> Unit)? = null,
+) {
+    val listState = rememberLazyListState(
+        cacheWindow = LazyLayoutCacheWindow(
+            aheadFraction = 1F,
+            behindFraction = 1F,
+        ),
+    )
+
+    LazyRow(
+        state = listState,
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = spacedBy(TraktTheme.spacing.mainRowSpace),
+        contentPadding = contentPadding,
+    ) {
+        items(
+            items = listItems,
+            key = { it.person.ids.trakt.value.plus(nextInt()) },
+        ) { item ->
+            VerticalMediaCard(
+                title = "",
+                imageUrl = item.person.images?.getHeadshotUrl(),
+                onClick = { onPersonClick?.invoke(item.person) },
+                more = false,
+                cardContent = {
+                    if (item.episodesCount > 0) {
+                        InfoChip(
+                            text = stringResource(R.string.tag_text_number_of_episodes, item.episodesCount),
+                            containerColor = TraktTheme.colors.chipContainerOnContent,
+                        )
+                    }
+                },
+                chipContent = {
+                    Column(
+                        verticalArrangement = Arrangement.Absolute.spacedBy(1.dp),
+                        modifier = Modifier.onClick { onPersonClick?.invoke(item.person) },
+                    ) {
+                        Text(
+                            text = item.person.name,
+                            style = TraktTheme.typography.cardTitle,
+                            color = TraktTheme.colors.textPrimary,
+                            maxLines = 1,
+                            overflow = Ellipsis,
+                        )
+
+                        Text(
+                            text = item.characters.firstOrNull() ?: "N/A",
+                            style = TraktTheme.typography.cardSubtitle,
+                            color = TraktTheme.colors.textSecondary,
+                            maxLines = 1,
+                            overflow = Ellipsis,
+                        )
+                    }
+                },
+                modifier = Modifier.animateItem(
+                    fadeInSpec = null,
+                    fadeOutSpec = null,
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ContentLoading(
+    visible: Boolean = true,
+    contentPadding: PaddingValues,
+) {
+    LazyRow(
+        horizontalArrangement = spacedBy(TraktTheme.spacing.mainRowSpace),
+        contentPadding = contentPadding,
+        userScrollEnabled = false,
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (visible) 1F else 0F),
+    ) {
+        items(count = 12) {
+            VerticalMediaSkeletonCard(
+                secondaryChip = true,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ContentEmpty(contentPadding: PaddingValues) {
+    Text(
+        text = stringResource(R.string.list_placeholder_empty),
+        color = TraktTheme.colors.textSecondary,
+        style = TraktTheme.typography.heading6,
+        modifier = Modifier.padding(contentPadding),
+    )
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@Preview(
+    device = "id:pixel_5",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+)
+@Composable
+private fun Preview() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.Blue.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            ShowActorsContent(
+                state = ShowActorsState(),
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@Preview(
+    device = "id:pixel_5",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+)
+@Composable
+private fun Preview2() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.Blue.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            ShowActorsContent(
+                state = ShowActorsState(
+                    items = emptyList<CastPerson>().toImmutableList(),
+                    loading = Loading,
+                ),
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@Preview(
+    device = "id:pixel_5",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+)
+@Composable
+private fun Preview3() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.Blue.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            ShowActorsContent(
+                state = ShowActorsState(
+                    items = emptyList<CastPerson>().toImmutableList(),
+                    loading = Done,
+                ),
+            )
+        }
+    }
+}

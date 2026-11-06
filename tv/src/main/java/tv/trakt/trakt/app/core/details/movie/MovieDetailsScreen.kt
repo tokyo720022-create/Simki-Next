@@ -1,0 +1,645 @@
+package tv.trakt.trakt.app.core.details.movie
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush.Companion.horizontalGradient
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.Lifecycle.Event.ON_RESUME
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.tv.material3.Text
+import com.google.android.play.core.review.ReviewManagerFactory
+import com.google.android.play.core.review.testing.FakeReviewManager
+import kotlinx.collections.immutable.toImmutableList
+import timber.log.Timber
+import tv.trakt.trakt.app.BuildConfig
+import tv.trakt.trakt.app.LocalDrawerVisibility
+import tv.trakt.trakt.app.LocalSnackbarState
+import tv.trakt.trakt.app.common.ui.ConfirmationDialog
+import tv.trakt.trakt.app.core.details.comments.CommentDetailsDialog
+import tv.trakt.trakt.app.core.details.movie.views.content.MovieCastCrewList
+import tv.trakt.trakt.app.core.details.movie.views.content.MovieCommentsList
+import tv.trakt.trakt.app.core.details.movie.views.content.MovieCustomListsList
+import tv.trakt.trakt.app.core.details.movie.views.content.MovieExtrasList
+import tv.trakt.trakt.app.core.details.movie.views.content.MovieRelatedList
+import tv.trakt.trakt.app.core.details.movie.views.header.MovieActionButtons
+import tv.trakt.trakt.app.core.details.movie.views.header.MovieHeader
+import tv.trakt.trakt.app.core.details.ui.BackdropImage
+import tv.trakt.trakt.app.core.details.ui.NoOpBringIntoViewSpec
+import tv.trakt.trakt.app.core.people.navigation.PersonDestination
+import tv.trakt.trakt.app.ui.theme.TraktTheme
+import tv.trakt.trakt.common.helpers.extensions.customAnnotatedString
+import tv.trakt.trakt.common.helpers.preview.PreviewData
+import tv.trakt.trakt.common.model.CastPerson
+import tv.trakt.trakt.common.model.Comment
+import tv.trakt.trakt.common.model.DateSelectionResult
+import tv.trakt.trakt.common.model.ExternalRating
+import tv.trakt.trakt.common.model.ExtraVideo
+import tv.trakt.trakt.common.model.Images
+import tv.trakt.trakt.common.model.Movie
+import tv.trakt.trakt.common.model.Person
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.lists.CustomList
+import tv.trakt.trakt.common.ui.theme.colors.Red400
+import tv.trakt.trakt.resources.R
+import java.time.ZonedDateTime
+import kotlin.math.roundToInt
+
+private val sections = listOf(
+    "poster",
+    "buttons",
+    "extras",
+    "people",
+    "comments",
+    "related",
+    "lists",
+)
+
+@Composable
+internal fun MovieDetailsScreen(
+    viewModel: MovieDetailsViewModel,
+    onNavigateToMovie: (TraktId) -> Unit,
+    onNavigateToPerson: (PersonDestination) -> Unit,
+    onNavigateToList: (CustomList) -> Unit,
+    onNavigateToVideo: (String) -> Unit,
+    onNavigateToStreamings: (Movie) -> Unit,
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    val localContext = LocalContext.current
+    val localSnack = LocalSnackbarState.current
+
+    var removeHistoryDialog by remember { mutableStateOf(false) }
+
+    MovieDetailsScreenContent(
+        state = state,
+        onNavigateToMovie = onNavigateToMovie,
+        onNavigateToPerson = onNavigateToPerson,
+        onNavigateToList = onNavigateToList,
+        onNavigateToVideo = onNavigateToVideo,
+        onNavigateToStreamings = {
+            viewModel.clearWatchNowTip()
+            onNavigateToStreamings(it)
+        },
+        onHistoryClick = viewModel::addHistory,
+        onRemoveHistoryClick = { removeHistoryDialog = true },
+        onWatchlistClick = viewModel::toggleWatchlist,
+        onDropMovieClick = viewModel::dropMoviePlayback,
+    )
+
+    if (removeHistoryDialog) {
+        RemoveHistoryConfirmationOverlay(
+            movieTitle = state.movieDetails?.title ?: "",
+            onConfirm = {
+                viewModel.removeHistory()
+                removeHistoryDialog = false
+            },
+            onDismiss = {
+                removeHistoryDialog = false
+            },
+        )
+    }
+
+    LaunchedEffect(state.snackMessage) {
+        state.snackMessage?.let {
+            localSnack.showSnackbar(it.get(localContext))
+            viewModel.clearInfoMessage()
+        }
+    }
+
+    LaunchedEffect(state.isReviewRequest) {
+        if (state.isReviewRequest) {
+            viewModel.clearReviewRequest()
+
+            val activity = localContext as? androidx.activity.ComponentActivity
+            activity?.let { activity ->
+                val manager = when {
+                    BuildConfig.DEBUG -> FakeReviewManager(activity)
+                    else -> ReviewManagerFactory.create(activity)
+                }
+
+                manager.requestReviewFlow().addOnCompleteListener { request ->
+                    if (request.isSuccessful) {
+                        val reviewInfo = request.result
+                        manager.launchReviewFlow(activity, reviewInfo)
+                        Timber.d("Review flow launched")
+                    } else {
+                        Timber.e("Review flow error: ${request.exception}")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun MovieDetailsScreenContent(
+    state: MovieDetailsState,
+    onNavigateToMovie: (TraktId) -> Unit,
+    onNavigateToPerson: (PersonDestination) -> Unit,
+    onNavigateToList: (CustomList) -> Unit,
+    onNavigateToVideo: (String) -> Unit,
+    onNavigateToStreamings: (Movie) -> Unit,
+    onHistoryClick: (DateSelectionResult) -> Unit,
+    onRemoveHistoryClick: () -> Unit,
+    onWatchlistClick: () -> Unit,
+    onDropMovieClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val drawerVisibility = LocalDrawerVisibility.current
+
+    var focusedSection by rememberSaveable { mutableStateOf<String?>(null) }
+    var initialFocusDone by rememberSaveable { mutableStateOf(false) }
+    val focusRequesters = remember {
+        sections.associateBy(
+            keySelector = { it },
+            valueTransform = { FocusRequester() },
+        )
+    }
+
+    var selectedComment by remember { mutableStateOf<Comment?>(null) }
+    var contentActive by remember { mutableStateOf(true) }
+
+    LaunchedEffect(contentActive) {
+        drawerVisibility.value = contentActive
+    }
+
+    LifecycleEventEffect(ON_RESUME) {
+        // Restore focus to the last focused row
+        if (state.movieDetails != null) {
+            focusRequesters[focusedSection]?.requestFocus()
+        }
+    }
+
+    BackHandler(enabled = selectedComment != null || !contentActive) {
+        if (!contentActive) {
+            contentActive = true
+            return@BackHandler
+        }
+        selectedComment = null
+        focusRequesters["comments"]?.requestFocus()
+    }
+
+    Box(
+        contentAlignment = Alignment.TopStart,
+        modifier = modifier
+            .fillMaxSize()
+            .background(TraktTheme.colors.backgroundPrimary)
+            .focusProperties {
+                onEnter = {
+                    if (state.movieDetails != null) {
+                        val target = focusedSection
+                            ?: if (state.user != null) "buttons" else "poster"
+                        focusRequesters[target]?.requestFocus()
+                    }
+                }
+            },
+    ) {
+        val scrollState = rememberScrollState()
+
+        BackdropImage(
+            imageUrl = state.movieDetails?.images?.getFanartUrl(Images.Size.FULL),
+            blur = 4.dp,
+            imageAlpha = 0.85F,
+            saturation = 0.95F,
+            active = contentActive,
+            modifier = Modifier
+                .graphicsLayer {
+                    // Parallax effect
+                    translationY = (scrollState.value * -0.2F).roundToInt().toFloat()
+                },
+        )
+
+        if (state.movieDetails != null) {
+            // Suppress focus-driven scroll until the initial focus has landed,
+            // so the screen stays at the top when the buttons row gets focused.
+            val bringIntoViewSpec = when {
+                initialFocusDone -> LocalBringIntoViewSpec.current
+                else -> NoOpBringIntoViewSpec
+            }
+
+            CompositionLocalProvider(LocalBringIntoViewSpec provides bringIntoViewSpec) {
+                Column(
+                    verticalArrangement = spacedBy(24.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(scrollState)
+                        .padding(bottom = TraktTheme.spacing.mainContentVerticalSpace)
+                        .alpha(if (contentActive) 1F else 0F),
+                ) {
+                    MovieHeader(
+                        movie = state.movieDetails,
+                        movieCollection = state.movieCollection,
+                        movieTranslation = state.movieTranslation,
+                        externalRating = state.movieRatings,
+                        focusRequester = focusRequesters.getValue("poster"),
+                        onFocused = {
+                            focusedSection = it
+                            initialFocusDone = true
+                        },
+                        onPosterClick = { contentActive = !contentActive },
+                        onPosterUnfocused = { contentActive = true },
+                        modifier = Modifier
+                            .padding(
+                                start = TraktTheme.spacing.mainContentStartSpace,
+                                top = TraktTheme.spacing.mainContentVerticalSpace,
+                            ),
+                    )
+
+                    MainContent(
+                        state = state,
+                        focusRequesters = focusRequesters,
+                        onFocused = {
+                            focusedSection = it
+                            initialFocusDone = true
+                        },
+                        onMovieClick = { onNavigateToMovie(it.ids.trakt) },
+                        onPersonClick = {
+                            onNavigateToPerson(
+                                PersonDestination(
+                                    personId = it.ids.trakt.value,
+                                    sourceId = state.movieDetails.ids.trakt.value,
+                                    backdropUrl = state.movieDetails.images?.getFanartUrl(Images.Size.FULL),
+                                ),
+                            )
+                        },
+                        onCommentClick = { selectedComment = it },
+                        onListClick = onNavigateToList,
+                        onVideoClick = onNavigateToVideo,
+                        onHistoryClick = onHistoryClick,
+                        onRemoveHistoryClick = onRemoveHistoryClick,
+                        onWatchlistClick = onWatchlistClick,
+                        onDropMovieClick = onDropMovieClick,
+                        onStreamingsClick = {
+                            onNavigateToStreamings(state.movieDetails)
+                        },
+                    )
+                }
+            }
+        }
+
+        CommentDetailsOverlay(
+            selectedComment = selectedComment,
+            onExited = {
+                selectedComment = null
+                focusRequesters["comments"]?.requestFocus()
+            },
+        )
+    }
+}
+
+@Composable
+private fun MainContent(
+    state: MovieDetailsState,
+    onFocused: (String) -> Unit,
+    onMovieClick: (Movie) -> Unit,
+    onPersonClick: (Person) -> Unit,
+    onCommentClick: (Comment) -> Unit,
+    onListClick: (CustomList) -> Unit,
+    onVideoClick: (String) -> Unit,
+    onHistoryClick: (DateSelectionResult) -> Unit,
+    onRemoveHistoryClick: () -> Unit,
+    onWatchlistClick: () -> Unit,
+    onStreamingsClick: () -> Unit,
+    onDropMovieClick: () -> Unit,
+    focusRequesters: Map<String, FocusRequester>,
+) {
+    Column(
+        horizontalAlignment = Alignment.Start,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            horizontalArrangement = spacedBy(24.dp, Alignment.Start),
+            verticalAlignment = Alignment.Top,
+            modifier = Modifier
+                .padding(
+                    start = TraktTheme.spacing.mainContentStartSpace,
+                    end = TraktTheme.spacing.mainContentEndSpace,
+                ),
+        ) {
+            val posterWidth = TraktTheme.size.detailsPosterSize * 0.666F
+            if (state.user != null) {
+                MovieActionButtons(
+                    movieState = state,
+                    onHistoryClick = onHistoryClick,
+                    onRemoveHistoryClick = onRemoveHistoryClick,
+                    onWatchlistClick = onWatchlistClick,
+                    onTrailerClick = onVideoClick,
+                    onStreamingLongClick = onStreamingsClick,
+                    onDropMovieClick = onDropMovieClick,
+                    modifier = Modifier
+                        .focusGroup()
+                        .focusRequester(focusRequesters.getValue("buttons"))
+                        .onFocusChanged { if (it.isFocused) onFocused("buttons") },
+                )
+            } else {
+                Spacer(Modifier.width(posterWidth))
+            }
+
+            Text(
+                text = state.movieTranslation?.overview ?: state.movieDetails?.overview
+                    ?: stringResource(R.string.text_overview_placeholder),
+                color = TraktTheme.colors.textPrimary,
+                style = TraktTheme.typography.paragraphLarge,
+                maxLines = 5,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        AnimatedVisibility(
+            visible = state.movieCast?.isNotEmpty() == true,
+            enter = fadeIn(),
+            exit = fadeOut(),
+        ) {
+            MovieCastCrewList(
+                header = stringResource(R.string.list_title_actors),
+                cast = { state.movieCast ?: emptyList<CastPerson>().toImmutableList() },
+                onFocused = { onFocused("people") },
+                onClick = onPersonClick,
+                modifier = Modifier
+                    .padding(top = 32.dp)
+                    .focusRequester(focusRequesters.getValue("people")),
+            )
+        }
+
+        AnimatedVisibility(
+            visible = state.movieComments?.isNotEmpty() == true,
+            enter = fadeIn(),
+            exit = fadeOut(),
+        ) {
+            MovieCommentsList(
+                header = stringResource(R.string.list_title_comments),
+                comments = { state.movieComments ?: emptyList<Comment>().toImmutableList() },
+                onFocused = { onFocused("comments") },
+                onClick = onCommentClick,
+                modifier = Modifier
+                    .padding(top = 36.dp)
+                    .focusRequester(focusRequesters.getValue("comments")),
+            )
+        }
+
+        AnimatedVisibility(
+            visible = state.movieVideos?.isNotEmpty() == true,
+            enter = fadeIn(),
+            exit = fadeOut(),
+        ) {
+            MovieExtrasList(
+                header = stringResource(R.string.list_title_extras),
+                videos = { state.movieVideos ?: emptyList<ExtraVideo>().toImmutableList() },
+                onClicked = onVideoClick,
+                onFocused = { onFocused("extras") },
+                modifier = Modifier
+                    .padding(top = 36.dp)
+                    .focusRequester(focusRequesters.getValue("extras")),
+            )
+        }
+
+        AnimatedVisibility(
+            visible = state.movieRelated?.isNotEmpty() == true,
+            enter = fadeIn(),
+            exit = fadeOut(),
+        ) {
+            MovieRelatedList(
+                header = stringResource(R.string.list_title_related_movies),
+                movies = { state.movieRelated ?: emptyList<Movie>().toImmutableList() },
+                onFocused = { onFocused("related") },
+                onClick = onMovieClick,
+                modifier = Modifier
+                    .padding(top = 36.dp)
+                    .focusRequester(focusRequesters.getValue("related")),
+            )
+        }
+
+        AnimatedVisibility(
+            visible = state.movieLists?.isNotEmpty() == true,
+            enter = fadeIn(),
+            exit = fadeOut(),
+        ) {
+            MovieCustomListsList(
+                header = stringResource(R.string.list_title_popular_lists),
+                lists = { state.movieLists ?: emptyList<CustomList>().toImmutableList() },
+                onFocused = { onFocused("lists") },
+                onClick = onListClick,
+                modifier = Modifier
+                    .padding(top = 36.dp)
+                    .focusRequester(focusRequesters.getValue("lists")),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CommentDetailsOverlay(
+    selectedComment: Comment?,
+    onExited: () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = selectedComment != null,
+        enter = EnterTransition.None,
+        exit = ExitTransition.None,
+    ) {
+        if (selectedComment != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        horizontalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.9F))),
+                    ),
+            ) {
+                CommentDetailsDialog(
+                    comment = selectedComment,
+                    modifier = Modifier
+                        .padding(32.dp)
+                        .width(400.dp)
+                        .align(Alignment.TopEnd)
+                        .animateEnterExit(
+                            enter = fadeIn() + slideInHorizontally { it / 10 },
+                            exit = ExitTransition.None,
+                        )
+                        .focusProperties {
+                            onExit = { onExited() }
+                        },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RemoveHistoryConfirmationOverlay(
+    movieTitle: String,
+    onConfirm: () -> Unit = {},
+    onDismiss: () -> Unit = {},
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.66F)),
+    )
+
+    Dialog(onDismissRequest = onDismiss) {
+        ConfirmationDialog(
+            title = stringResource(
+                R.string.button_label_remove_from_watched,
+                movieTitle,
+            ),
+            annotatedMessage = customAnnotatedString(
+                stringResource(
+                    R.string.warning_prompt_remove_from_watched,
+                    movieTitle,
+                ),
+                style = TraktTheme.typography.paragraph.toSpanStyle()
+                    .copy(
+                        fontWeight = FontWeight.W600,
+                        textDecoration = TextDecoration.Underline,
+                    ),
+            ),
+            confirmColor = Red400,
+            onConfirm = {
+                onConfirm()
+                onDismiss()
+            },
+            onCancel = onDismiss,
+        )
+    }
+}
+
+@Preview(
+    device = "id:tv_4k",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+    heightDp = 1500,
+)
+@Composable
+private fun Preview() {
+    TraktTheme {
+        MovieDetailsScreenContent(
+            state = MovieDetailsState(
+                movieDetails = PreviewData.movie1,
+                movieRatings = ExternalRating(
+                    trakt = null,
+                    imdb = ExternalRating.ImdbRating(
+                        rating = 7.9F,
+                        votes = 1_267_356,
+                        link = "https://www.imdb.com/title/tt1234567/",
+                    ),
+                    meta = ExternalRating.MetaRating(
+                        rating = 85,
+                        link = "https://www.metacritic.com/movie/some-movie",
+                    ),
+                    rotten = ExternalRating.RottenRating(
+                        rating = 90F,
+                        state = "Fresh",
+                        userRating = 80,
+                        userState = "spilled",
+                        link = "https://www.rottentomatoes.com/m/some_movie",
+                    ),
+                    tmdb = ExternalRating.TmdbRating(
+                        rating = 7.5F,
+                        votes = 123_456,
+                        link = "https://www.themoviedb.org/movie/12345",
+                    ),
+                    mal = ExternalRating.MalRating(
+                        rating = 8.2F,
+                        votes = 45_678,
+                        link = "https://myanimelist.net/anime/12345",
+                    ),
+                    letterboxd = ExternalRating.LetterboxdRating(
+                        rating = 4.0F,
+                        votes = 12_345,
+                        link = "https://letterboxd.com/film/some-movie/",
+                    ),
+                ),
+                movieVideos = listOf(
+                    ExtraVideo(
+                        title = "Featurette: Thailand",
+                        url = "https://youtube.com/watch?v=4mdAbk4d8KY",
+                        site = "youtube",
+                        type = "behind the scenes",
+                        official = true,
+                        publishedAt = ZonedDateTime.now(),
+                    ),
+                    ExtraVideo(
+                        title = "Featurette: Thailand 2",
+                        url = "https://youtube.com/watch?v=4mdAbk4dXXY",
+                        site = "youtube",
+                        type = "trailer",
+                        official = true,
+                        publishedAt = ZonedDateTime.now(),
+                    ),
+                ).toImmutableList(),
+                movieCast = listOf(
+                    CastPerson(
+                        person = PreviewData.person1,
+                        characters = listOf("Character 1", "Character 2"),
+                    ),
+                    CastPerson(
+                        person = PreviewData.person2,
+                        characters = listOf("Character 2"),
+                    ),
+                ).toImmutableList(),
+                movieRelated = listOf(
+                    PreviewData.movie1,
+                    PreviewData.movie2,
+                ).toImmutableList(),
+                movieLists = listOf(
+                    PreviewData.customList1,
+                ).toImmutableList(),
+            ),
+            onNavigateToMovie = {},
+            onNavigateToPerson = {},
+            onNavigateToList = {},
+            onNavigateToVideo = {},
+            onHistoryClick = {},
+            onRemoveHistoryClick = {},
+            onWatchlistClick = {},
+            onNavigateToStreamings = {},
+            onDropMovieClick = {},
+        )
+    }
+}

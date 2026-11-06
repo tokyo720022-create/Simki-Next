@@ -1,0 +1,285 @@
+@file:Suppress("UNCHECKED_CAST")
+
+package tv.trakt.trakt.core.profile.sections.progress.all
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import timber.log.Timber
+import tv.trakt.trakt.common.core.sync.changes.DataChange.Kind
+import tv.trakt.trakt.common.core.sync.changes.DataChanges
+import tv.trakt.trakt.common.data.local.ShowLocalSource
+import tv.trakt.trakt.common.firebase.analytics.Analytics
+import tv.trakt.trakt.common.helpers.LoadingState
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.LoadingState.Idle
+import tv.trakt.trakt.common.helpers.LoadingState.Loading
+import tv.trakt.trakt.common.helpers.extensions.recordError
+import tv.trakt.trakt.common.helpers.extensions.rethrowCancellation
+import tv.trakt.trakt.common.model.Show
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.common.model.profile.ProfileProgressItem
+import tv.trakt.trakt.core.lists.ListsConfig.PROGRESS_PAGE_LIMIT
+import tv.trakt.trakt.core.profile.sections.progress.filters.GetProgressFilterUseCase
+import tv.trakt.trakt.core.profile.sections.progress.model.ProgressFilter
+import tv.trakt.trakt.core.profile.sections.progress.model.ProgressFilter.Dropped
+import tv.trakt.trakt.core.profile.sections.progress.model.ProgressFilter.Ended
+import tv.trakt.trakt.core.profile.sections.progress.model.ProgressFilter.InProgress
+import tv.trakt.trakt.core.profile.sections.progress.model.ProgressFilter.UpToDate
+import tv.trakt.trakt.core.profile.sections.progress.model.ProgressPage
+import tv.trakt.trakt.core.profile.sections.progress.model.ProgressSorting
+import tv.trakt.trakt.core.profile.sections.progress.model.asPage
+import tv.trakt.trakt.core.profile.sections.progress.model.pageOfEnded
+import tv.trakt.trakt.core.profile.sections.progress.usecase.GetProgressCompleteUseCase
+import tv.trakt.trakt.core.profile.sections.progress.usecase.GetProgressDroppedUseCase
+import tv.trakt.trakt.core.profile.sections.progress.usecase.GetProgressWatchingUseCase
+import kotlin.time.Duration.Companion.milliseconds
+
+internal class AllProgressViewModel(
+    private val getFilterUseCase: GetProgressFilterUseCase,
+    private val getCompletedUseCase: GetProgressCompleteUseCase,
+    private val getDroppedUseCase: GetProgressDroppedUseCase,
+    private val getWatchingUseCase: GetProgressWatchingUseCase,
+    private val localShowSource: ShowLocalSource,
+    private val dataChanges: DataChanges,
+    private val analytics: Analytics,
+) : ViewModel() {
+    private val initialState = AllProgressState()
+
+    private val userState = MutableStateFlow(initialState.user)
+    private val itemsState = MutableStateFlow(initialState.items)
+    private val filterState = MutableStateFlow(initialState.filter)
+    private val sortingState = MutableStateFlow(initialState.sorting)
+    private val navigateShow = MutableStateFlow(initialState.navigateShow)
+    private val loadingState = MutableStateFlow(initialState.loading)
+    private val loadingMoreState = MutableStateFlow(initialState.loadingMore)
+    private val errorState = MutableStateFlow(initialState.error)
+
+    private var loadDataJob: Job? = null
+    private var loadMoreJob: Job? = null
+
+    private var page: Int = 1
+    private var hasMoreData: Boolean = false
+
+    init {
+        loadData()
+        observeData()
+    }
+
+    @OptIn(FlowPreview::class)
+    private fun observeData() {
+        dataChanges.observe(Kind.History)
+            .debounce(200.milliseconds)
+            .onEach {
+                loadData(ignoreErrors = true)
+            }.launchIn(viewModelScope)
+    }
+
+    fun loadData(ignoreErrors: Boolean = false) {
+        loadDataJob?.cancel()
+        loadDataJob = viewModelScope.launch {
+            try {
+                page = 1
+
+                loadingState.update { Idle }
+                errorState.update { null }
+
+                if (filterState.value == null) {
+                    filterState.update {
+                        getFilterUseCase.getFilter()
+                    }
+                }
+
+                loadingState.update { Loading }
+
+                val (lastPage, result) = fetchFilledPage(
+                    filter = filterState.value ?: UpToDate,
+                    page = 1,
+                )
+
+                itemsState.update { result.items }
+                page = lastPage
+                hasMoreData = result.fetched >= PROGRESS_PAGE_LIMIT
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    if (!ignoreErrors) {
+                        errorState.update { error }
+                    }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingState.update { Done }
+                loadDataJob = null
+            }
+        }
+    }
+
+    fun loadMoreData() {
+        if (itemsState.value.isNullOrEmpty() || !hasMoreData) return
+        if (loadingMoreState.value.isLoading || loadingState.value.isLoading) return
+
+        loadMoreJob = viewModelScope.launch {
+            try {
+                loadingMoreState.update { Loading }
+
+                val (lastPage, result) = fetchFilledPage(
+                    filter = filterState.value ?: UpToDate,
+                    page = page + 1,
+                )
+
+                itemsState.update { items ->
+                    items
+                        ?.plus(result.items)
+                        ?.distinctBy { it.key }
+                        ?.toImmutableList()
+                }
+
+                page = lastPage
+                hasMoreData = result.fetched >= PROGRESS_PAGE_LIMIT
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingMoreState.update { Done }
+            }
+        }
+    }
+
+    private tailrec suspend fun fetchFilledPage(
+        filter: ProgressFilter,
+        page: Int,
+    ): Pair<Int, ProgressPage> {
+        val result = fetchData(filter, page)
+        if (result.items.isNotEmpty() || result.fetched < PROGRESS_PAGE_LIMIT) {
+            return page to result
+        }
+        return fetchFilledPage(filter, page + 1)
+    }
+
+    private suspend fun fetchData(
+        filter: ProgressFilter,
+        page: Int,
+    ): ProgressPage {
+        return when (filter) {
+            UpToDate -> {
+                getCompletedUseCase
+                    .getCompleted(
+                        page = page,
+                        limit = PROGRESS_PAGE_LIMIT,
+                        sorting = sortingState.value,
+                    )
+                    .pageOfEnded(ended = false)
+            }
+
+            Ended -> {
+                getCompletedUseCase
+                    .getCompleted(
+                        page = page,
+                        limit = PROGRESS_PAGE_LIMIT,
+                        sorting = sortingState.value,
+                    )
+                    .pageOfEnded(ended = true)
+            }
+
+            InProgress -> {
+                getWatchingUseCase
+                    .getWatching(
+                        page = page,
+                        limit = PROGRESS_PAGE_LIMIT,
+                        sorting = sortingState.value,
+                    )
+                    .asPage()
+            }
+
+            Dropped -> {
+                getDroppedUseCase
+                    .getDropped(
+                        page = page,
+                        limit = PROGRESS_PAGE_LIMIT,
+                    )
+                    .asPage()
+            }
+        }
+    }
+
+    fun setFilter(newFilter: ProgressFilter) {
+        if (newFilter == filterState.value || loadingState.value.isLoading) {
+            return
+        }
+        viewModelScope.launch {
+            filterState.update { newFilter }
+            loadData()
+        }
+    }
+
+    fun setSorting(newSorting: ProgressSorting) {
+        if (newSorting == sortingState.value || loadingState.value.isLoading) {
+            return
+        }
+        loadMoreJob?.cancel()
+        sortingState.update { newSorting }
+        analytics.lists.logListSort(
+            sortBy = newSorting.type.value,
+            sortHow = newSorting.order.value,
+        )
+        loadData()
+    }
+
+    fun navigateToShow(show: Show) {
+        viewModelScope.launch {
+            localShowSource.upsertShows(listOf(show))
+            navigateShow.update { show.ids.trakt }
+        }
+    }
+
+    fun clearNavigation() {
+        navigateShow.update { null }
+    }
+
+    override fun onCleared() {
+        loadDataJob?.cancel()
+        loadDataJob = null
+        super.onCleared()
+    }
+
+    val state = combine(
+        loadingState,
+        loadingMoreState,
+        itemsState,
+        filterState,
+        navigateShow,
+        userState,
+        errorState,
+        sortingState,
+    ) { states ->
+        AllProgressState(
+            loading = states[0] as LoadingState,
+            loadingMore = states[1] as LoadingState,
+            items = states[2] as? ImmutableList<ProfileProgressItem>,
+            filter = states[3] as? ProgressFilter,
+            navigateShow = states[4] as? TraktId,
+            user = states[5] as? User,
+            error = states[6] as? Exception,
+            sorting = states[7] as ProgressSorting,
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = initialState,
+    )
+}

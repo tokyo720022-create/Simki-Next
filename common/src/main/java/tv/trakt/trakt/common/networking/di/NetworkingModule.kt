@@ -1,0 +1,383 @@
+package tv.trakt.trakt.common.networking.di
+
+import io.ktor.client.HttpClientConfig
+import io.ktor.client.engine.HttpClientEngine
+import io.ktor.client.plugins.cache.storage.CacheStorage
+import io.ktor.client.plugins.cache.storage.FileStorage
+import org.koin.android.ext.koin.androidContext
+import org.koin.core.module.dsl.singleOf
+import org.koin.core.qualifier.named
+import org.koin.dsl.module
+import org.openapitools.client.apis.CalendarsApi
+import org.openapitools.client.apis.CheckinApi
+import org.openapitools.client.apis.CollectionApi
+import org.openapitools.client.apis.CommentsApi
+import org.openapitools.client.apis.EpisodeApi
+import org.openapitools.client.apis.EpisodesApi
+import org.openapitools.client.apis.HistoryApi
+import org.openapitools.client.apis.ListsApi
+import org.openapitools.client.apis.MediaApi
+import org.openapitools.client.apis.MoviesApi
+import org.openapitools.client.apis.OauthApi
+import org.openapitools.client.apis.PeopleApi
+import org.openapitools.client.apis.RatingsApi
+import org.openapitools.client.apis.ReactionsApi
+import org.openapitools.client.apis.RecommendationsApi
+import org.openapitools.client.apis.ScrobbleApi
+import org.openapitools.client.apis.SearchApi
+import org.openapitools.client.apis.ShowsApi
+import org.openapitools.client.apis.SmartListsApi
+import org.openapitools.client.apis.SyncApi
+import org.openapitools.client.apis.UsersApi
+import org.openapitools.client.apis.WatchedApi
+import org.openapitools.client.apis.WatchnowApi
+import tv.trakt.trakt.common.BuildConfig
+import tv.trakt.trakt.common.Config.API_BASE_URL
+import tv.trakt.trakt.common.Config.API_V3_BASE_URL
+import tv.trakt.trakt.common.Config.KLIPY_BASE_URL
+import tv.trakt.trakt.common.Config.WEB_AUTH_URL
+import tv.trakt.trakt.common.networking.api.klipy.KlipyApi
+import tv.trakt.trakt.common.networking.api.people.PeopleExtrasApi
+import tv.trakt.trakt.common.networking.api.plex.PlexStreamApi
+import tv.trakt.trakt.common.networking.api.scrobble.ScrobbleExtrasApi
+import tv.trakt.trakt.common.networking.api.v3.V3Api
+import tv.trakt.trakt.common.networking.client.KtorClientFactory
+import tv.trakt.trakt.common.networking.helpers.AccountLockMonitor
+import tv.trakt.trakt.common.networking.helpers.CacheMarkerProvider
+import tv.trakt.trakt.common.networking.helpers.DefaultCacheMarkerProvider
+import java.nio.file.Files
+
+val networkingModule = module {
+    single<CacheStorage> {
+        val cacheDir = androidContext().cacheDir.resolve("ktor")
+        val cacheFile = Files.createDirectories(cacheDir.toPath()).toFile()
+        FileStorage(cacheFile)
+    }
+
+    single<KtorClientFactory> {
+        KtorClientFactory(
+            cacheMarkerProvider = get(),
+            tokenProvider = get(),
+            sessionManager = get(),
+            fileStorage = get(),
+            accountLockMonitor = get(),
+        )
+    }
+
+    single<HttpClientEngine> {
+        val factory = get<KtorClientFactory>()
+        factory.createClientEngine()
+    }
+
+    single<(HttpClientConfig<*>) -> Unit>(named("clientConfig")) {
+        val factory = get<KtorClientFactory>()
+        factory.createClientConfig()
+    }
+
+    single<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")) {
+        val factory = get<KtorClientFactory>()
+        factory.createAuthorizedClientConfig()
+    }
+
+    single<(HttpClientConfig<*>) -> Unit>(named("klipyClientConfig")) {
+        val factory = get<KtorClientFactory>()
+        factory.createKlipyClientConfig()
+    }
+
+    single<CacheMarkerProvider> {
+        DefaultCacheMarkerProvider()
+    }
+
+    singleOf(::AccountLockMonitor)
+}
+
+val networkingApiModule = module {
+    single(named("apiClients")) {
+        arrayOf(
+            get<CalendarsApi>(),
+            get<CalendarsApi>(named("authorizedCalendarsApi")),
+            get<CheckinApi>(),
+            get<CollectionApi>(),
+            get<CommentsApi>(),
+            get<CommentsApi>(named("authorizedCommentsApi")),
+            get<EpisodeApi>(),
+            get<EpisodesApi>(),
+            get<HistoryApi>(),
+            get<ListsApi>(),
+            get<MoviesApi>(),
+            get<OauthApi>(),
+            get<PeopleApi>(),
+            get<PeopleApi>(named("authorizedPeopleApi")),
+            get<RatingsApi>(),
+            get<ReactionsApi>(),
+            get<RecommendationsApi>(),
+            get<SearchApi>(),
+            get<SearchApi>(named("authorizedSearchApi")),
+            get<ShowsApi>(),
+            get<SyncApi>(),
+            get<ScrobbleApi>(),
+            get<UsersApi>(),
+            get<WatchedApi>(),
+            get<V3Api>(),
+            get<ScrobbleExtrasApi>(),
+        )
+    }
+
+    single<V3Api> {
+        V3Api(
+            baseUrl = API_BASE_URL,
+            baseV3Url = API_V3_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<KlipyApi> {
+        KlipyApi(
+            baseUrl = KLIPY_BASE_URL,
+            appKey = BuildConfig.KLIPY_API_KEY,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("klipyClientConfig")),
+        )
+    }
+
+    single<ScrobbleExtrasApi> {
+        ScrobbleExtrasApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<ScrobbleApi> {
+        ScrobbleApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<WatchedApi> {
+        WatchedApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<CollectionApi> {
+        CollectionApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<EpisodeApi> {
+        EpisodeApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("clientConfig")),
+        )
+    }
+
+    single<EpisodesApi> {
+        EpisodesApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("clientConfig")),
+        )
+    }
+
+    single<ShowsApi> {
+        ShowsApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<MoviesApi> {
+        MoviesApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<MediaApi> {
+        MediaApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<WatchnowApi> {
+        WatchnowApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("clientConfig")),
+        )
+    }
+
+    single<RecommendationsApi> {
+        RecommendationsApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<ReactionsApi> {
+        ReactionsApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<RatingsApi> {
+        RatingsApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<ListsApi> {
+        ListsApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<PeopleApi> {
+        PeopleApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("clientConfig")),
+        )
+    }
+
+    single<PeopleApi>(named("authorizedPeopleApi")) {
+        PeopleApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<PlexStreamApi> {
+        PlexStreamApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<PeopleExtrasApi> {
+        PeopleExtrasApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<SearchApi> {
+        SearchApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("clientConfig")),
+        )
+    }
+
+    single<SearchApi>(named("authorizedSearchApi")) {
+        SearchApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<CommentsApi> {
+        CommentsApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("clientConfig")),
+        )
+    }
+
+    single<CommentsApi>(named("authorizedCommentsApi")) {
+        CommentsApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<CalendarsApi> {
+        CalendarsApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("clientConfig")),
+        )
+    }
+
+    single<CalendarsApi>(named("authorizedCalendarsApi")) {
+        CalendarsApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<SyncApi> {
+        SyncApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<UsersApi> {
+        UsersApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<SmartListsApi> {
+        SmartListsApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<HistoryApi> {
+        HistoryApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<CheckinApi> {
+        CheckinApi(
+            baseUrl = API_BASE_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("authorizedClientConfig")),
+        )
+    }
+
+    single<OauthApi> {
+        OauthApi(
+            baseUrl = WEB_AUTH_URL,
+            httpClientEngine = get(),
+            httpClientConfig = get<(HttpClientConfig<*>) -> Unit>(named("clientConfig")),
+        )
+    }
+}

@@ -1,0 +1,998 @@
+@file:OptIn(FlowPreview::class)
+
+package tv.trakt.trakt.core.summary.movies
+
+import android.content.Context
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.navigation.toRoute
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import timber.log.Timber
+import tv.trakt.trakt.common.auth.session.SessionManager
+import tv.trakt.trakt.common.core.favorites.FavoriteItem
+import tv.trakt.trakt.common.core.lists.model.WatchlistItem
+import tv.trakt.trakt.common.core.sync.changes.ChangeOrigin
+import tv.trakt.trakt.common.core.sync.changes.DataChange.Kind
+import tv.trakt.trakt.common.core.sync.changes.DataChanges
+import tv.trakt.trakt.common.core.translations.model.MediaTranslation
+import tv.trakt.trakt.common.core.translations.usecase.GetMovieTranslationsUseCase
+import tv.trakt.trakt.common.core.user.usecases.lists.LoadUserFavoritesUseCase
+import tv.trakt.trakt.common.core.user.usecases.lists.LoadUserListsUseCase
+import tv.trakt.trakt.common.core.user.usecases.lists.LoadUserWatchlistUseCase
+import tv.trakt.trakt.common.core.user.usecases.progress.LoadUserProgressUseCase
+import tv.trakt.trakt.common.data.local.UserFavoritesLocalSource
+import tv.trakt.trakt.common.data.local.UserWatchlistLocalSource
+import tv.trakt.trakt.common.data.local.UserWatchlistMinimalLocalSource
+import tv.trakt.trakt.common.firebase.analytics.Analytics
+import tv.trakt.trakt.common.firebase.inappreview.RequestAppReviewUseCase
+import tv.trakt.trakt.common.helpers.DynamicStringResource
+import tv.trakt.trakt.common.helpers.LoadingState
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.LoadingState.Loading
+import tv.trakt.trakt.common.helpers.StringResource
+import tv.trakt.trakt.common.helpers.errors.GlobalErrorsManager
+import tv.trakt.trakt.common.helpers.extensions.EmptyImmutableList
+import tv.trakt.trakt.common.helpers.extensions.HTTP_ERROR_TRAKT_VIP_LIMIT
+import tv.trakt.trakt.common.helpers.extensions.getHttpCode
+import tv.trakt.trakt.common.helpers.extensions.nowUtcInstant
+import tv.trakt.trakt.common.helpers.extensions.recordError
+import tv.trakt.trakt.common.helpers.extensions.rethrowCancellation
+import tv.trakt.trakt.common.model.DateSelectionResult
+import tv.trakt.trakt.common.model.ExternalRating
+import tv.trakt.trakt.common.model.ExtraVideo
+import tv.trakt.trakt.common.model.MediaType
+import tv.trakt.trakt.common.model.MediaType.Movie
+import tv.trakt.trakt.common.model.Movie
+import tv.trakt.trakt.common.model.Person
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.common.model.ratings.UserRating
+import tv.trakt.trakt.common.model.toTraktId
+import tv.trakt.trakt.core.checkin.data.CheckInManager
+import tv.trakt.trakt.core.ratings.data.work.PostRatingWorker
+import tv.trakt.trakt.core.summary.helpers.hasLightsaber
+import tv.trakt.trakt.core.summary.movies.MovieDetailsState.UserRatingsState
+import tv.trakt.trakt.core.summary.movies.features.actors.usecases.GetMovieDirectorUseCase
+import tv.trakt.trakt.core.summary.movies.features.socials.GetMovieSocialsUseCase
+import tv.trakt.trakt.core.summary.movies.navigation.MovieDetailsDestination
+import tv.trakt.trakt.core.summary.movies.usecases.GetMovieDetailsUseCase
+import tv.trakt.trakt.core.summary.movies.usecases.GetMovieRatingsUseCase
+import tv.trakt.trakt.core.summary.social.model.MediaSocialActivity
+import tv.trakt.trakt.core.sync.usecases.UpdateMovieFavoritesUseCase
+import tv.trakt.trakt.core.sync.usecases.UpdateMovieHistoryUseCase
+import tv.trakt.trakt.core.sync.usecases.UpdateMovieWatchlistUseCase
+import tv.trakt.trakt.core.user.usecases.ratings.LoadUserRatingsUseCase
+import tv.trakt.trakt.resources.R
+import java.util.Locale
+import kotlin.time.Duration.Companion.milliseconds
+
+internal class MovieDetailsViewModel(
+    savedStateHandle: SavedStateHandle,
+    private val appContext: Context,
+    private val getDetailsUseCase: GetMovieDetailsUseCase,
+    private val getExternalRatingsUseCase: GetMovieRatingsUseCase,
+    private val getMovieDirectorUseCase: GetMovieDirectorUseCase,
+    private val getMovieTranslationsUseCase: GetMovieTranslationsUseCase,
+    private val getMovieSocialsUseCase: GetMovieSocialsUseCase,
+    private val loadProgressUseCase: LoadUserProgressUseCase,
+    private val loadWatchlistUseCase: LoadUserWatchlistUseCase,
+    private val loadListsUseCase: LoadUserListsUseCase,
+    private val loadRatingUseCase: LoadUserRatingsUseCase,
+    private val loadFavoritesUseCase: LoadUserFavoritesUseCase,
+    private val updateMovieHistoryUseCase: UpdateMovieHistoryUseCase,
+    private val updateMovieWatchlistUseCase: UpdateMovieWatchlistUseCase,
+    private val updateMovieFavoritesUseCase: UpdateMovieFavoritesUseCase,
+    private val appReviewUseCase: RequestAppReviewUseCase,
+    private val userWatchlistLocalSource: UserWatchlistLocalSource,
+    private val userWatchlistMinLocalSource: UserWatchlistMinimalLocalSource,
+    private val userFavoritesLocalSource: UserFavoritesLocalSource,
+    private val dataChanges: DataChanges,
+    private val sessionManager: SessionManager,
+    private val checkInManager: CheckInManager,
+    private val errorsManager: GlobalErrorsManager,
+    private val analytics: Analytics,
+) : ViewModel() {
+    private val destination = savedStateHandle.toRoute<MovieDetailsDestination>()
+    private val movieId = destination.movieId.toTraktId()
+
+    private val initialState = MovieDetailsState()
+    private val origin = ChangeOrigin.unique()
+
+    private val movieState = MutableStateFlow(initialState.movie)
+    private val movieRatingsState = MutableStateFlow(initialState.movieRatings)
+    private val movieUserRatingsState = MutableStateFlow(initialState.movieUserRating)
+    private val movieCreatorState = MutableStateFlow(initialState.movieCreator)
+    private val movieProgressState = MutableStateFlow(initialState.movieProgress)
+    private val movieTranslationState = MutableStateFlow(initialState.movieTranslation)
+    private val movieSocialsState = MutableStateFlow(initialState.movieSocials)
+    private val loadingState = MutableStateFlow(initialState.loading)
+    private val loadingProgress = MutableStateFlow(initialState.loadingProgress)
+    private val loadingLists = MutableStateFlow(initialState.loadingLists)
+    private val loadingFavorite = MutableStateFlow(initialState.loadingFavorite)
+    private val infoState = MutableStateFlow(initialState.info)
+    private val errorState = MutableStateFlow(initialState.error)
+    private val userState = MutableStateFlow(initialState.user)
+    private val lightsaberState = MutableStateFlow(initialState.lightsaber)
+
+    private var ratingJob: Job? = null
+
+    init {
+        loadUser()
+        loadData()
+
+        loadUserProgressData()
+        loadUserRatingData()
+
+        observeHistory()
+        observeCheckIn()
+        observeLists()
+        observeRatings()
+
+        analytics.logScreenView(
+            screenName = "movie_details",
+        )
+    }
+
+    private fun observeCheckIn() {
+        dataChanges.observe(Kind.CheckIn, exclude = origin)
+            .debounce(200.milliseconds)
+            .onEach {
+                loadUserProgressData(force = true)
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun observeHistory() {
+        dataChanges.observe(Kind.History, exclude = origin)
+            .debounce(200.milliseconds)
+            .onEach {
+                loadUserProgressData(force = true)
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun observeRatings() {
+        dataChanges.observe(Kind.Ratings, exclude = origin)
+            .debounce(200.milliseconds)
+            .onEach {
+                refreshUserRating()
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun observeLists() {
+        dataChanges.observe(Kind.Lists)
+            .debounce(200.milliseconds)
+            .onEach {
+                refreshLists()
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun loadUser() {
+        viewModelScope.launch {
+            try {
+                userState.update {
+                    sessionManager.getProfile()
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    private fun loadData() {
+        viewModelScope.launch {
+            try {
+                var movie = getDetailsUseCase.getLocalMovie(movieId)
+                if (movie == null) {
+                    loadingState.update { Loading }
+                    movie = getDetailsUseCase.getMovie(
+                        movieId = movieId,
+                    )
+                }
+                movieState.update { movie }
+                lightsaberState.update { hasLightsaber(movie.title) }
+
+                loadTranslations()
+                loadRatings(movie)
+                loadSocials()
+                loadCreator()
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingState.update { Done }
+            }
+        }
+    }
+
+    private fun loadTranslations() {
+        viewModelScope.launch {
+            try {
+                val locale = AppCompatDelegate.getApplicationLocales().get(0) ?: Locale.getDefault()
+                movieTranslationState.update {
+                    getMovieTranslationsUseCase.getMovieTranslations(
+                        movieId = movieId,
+                        locale = locale,
+                    )
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    private fun loadSocials() {
+        viewModelScope.launch {
+            try {
+                movieSocialsState.update {
+                    getMovieSocialsUseCase.getSocials(movieId)
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    // Empty marks the load as finished, so the social row does not wait forever.
+                    movieSocialsState.update { EmptyImmutableList }
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    private fun loadUserProgressData(force: Boolean = false) {
+        viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+            try {
+                loadingProgress.update { Loading }
+                loadingLists.update { Loading }
+
+                coroutineScope {
+                    val progressAsync = async {
+                        if (force || !loadProgressUseCase.isMoviesLoaded()) {
+                            loadProgressUseCase.loadMoviesProgress()
+                        }
+                    }
+                    val watchlistAsync = async {
+                        if (force || !loadWatchlistUseCase.isMoviesLoaded()) {
+                            loadWatchlistUseCase.loadWatchlist()
+                        }
+                    }
+                    val listsAsync = async {
+                        if (!loadListsUseCase.isLoaded()) {
+                            loadListsUseCase.loadLists()
+                        }
+                    }
+                    progressAsync.await()
+                    watchlistAsync.await()
+                    listsAsync.await()
+                }
+
+                coroutineScope {
+                    val progressAsync = async {
+                        loadProgressUseCase.loadLocalMovies()
+                            .firstOrNull {
+                                it.movie.ids.trakt == movieId
+                            }
+                    }
+
+                    val watchlistAsync = async { loadWatchlistUseCase.loadLocalMovies() }
+                    val listsAsync = async { loadListsUseCase.loadLocalLists() }
+
+                    val progress = progressAsync.await()
+                    val watchlist = watchlistAsync.await()
+                    val lists = listsAsync.await()
+
+                    movieProgressState.update {
+                        MovieDetailsState.ProgressState(
+                            plays = progress?.plays?.size ?: 0,
+                            inWatchlist = watchlist.contains(movieId),
+                            inLists = lists.isNotEmpty(),
+                        )
+                    }
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingProgress.update { Done }
+                loadingLists.update { Done }
+            }
+        }
+    }
+
+    private fun loadUserRatingData() {
+        viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+            try {
+                movieUserRatingsState.update {
+                    UserRatingsState(
+                        loading = Loading,
+                    )
+                }
+
+                coroutineScope {
+                    val ratingsAsync = async {
+                        if (!loadRatingUseCase.isMoviesLoaded()) {
+                            loadRatingUseCase.loadMovies()
+                        }
+                    }
+
+                    val favoritesAsync = async {
+                        if (!loadFavoritesUseCase.isMoviesLoaded()) {
+                            loadFavoritesUseCase.loadMovies()
+                        }
+                    }
+
+                    ratingsAsync.await()
+                    favoritesAsync.await()
+                }
+
+                val userRatings = loadRatingUseCase.loadLocalMovies()
+                val userFavorites = loadFavoritesUseCase.loadLocalMovies()
+                    .associateBy { it.movie.ids.trakt }
+
+                val userRating = userRatings[movieId]?.copy(
+                    favorite = userFavorites[movieId] != null,
+                ) ?: UserRating(
+                    mediaId = movieId,
+                    mediaType = Movie,
+                    rating = 0,
+                    favorite = userFavorites[movieId] != null,
+                )
+
+                movieUserRatingsState.update {
+                    UserRatingsState(
+                        rating = userRating,
+                        loading = Done,
+                    )
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    private fun refreshUserRating() {
+        viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+            try {
+                val rating = loadRatingUseCase.loadLocalMovies()[movieId]?.rating ?: 0
+                movieUserRatingsState.update { state ->
+                    state?.copy(
+                        rating = state.rating?.copy(rating = rating) ?: UserRating(
+                            mediaId = movieId,
+                            mediaType = Movie,
+                            rating = rating,
+                        ),
+                    )
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    private fun loadRatings(movie: Movie?) {
+        if (movie?.isReleased != true) {
+            // Don't load ratings for unreleased movies
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                movieRatingsState.update {
+                    getExternalRatingsUseCase.getExternalRatings(movieId)
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    private fun loadCreator() {
+        viewModelScope.launch {
+            try {
+                movieCreatorState.update {
+                    getMovieDirectorUseCase.getDirector(movieId)
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    fun addToCheckIn() {
+        if (movieState.value == null ||
+            loadingState.value.isLoading ||
+            loadingProgress.value.isLoading ||
+            loadingLists.value.isLoading
+        ) {
+            return
+        }
+
+        viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+
+            try {
+                loadingProgress.update { Loading }
+
+                checkInManager.startMovie(
+                    movieId = movieId,
+                    origin = origin,
+                    context = appContext,
+                )
+
+                loadProgressUseCase.loadMoviesProgress()
+
+                userWatchlistLocalSource.removeMovies(ids = setOf(movieId))
+                userWatchlistMinLocalSource.removeMovies(ids = setOf(movieId))
+
+                dataChanges.notify(Kind.Watchlist)
+                dataChanges.notify(Kind.History, origin = origin)
+
+                movieProgressState.update {
+                    it?.copy(
+                        plays = it.plays + 1,
+                        inWatchlist = false,
+                    )
+                }
+
+                analytics.progress.logAddWatchedMedia(
+                    mediaType = "movie",
+                    source = "movie_details",
+                    date = "checkin",
+                )
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingProgress.update { Done }
+            }
+        }
+    }
+
+    // History
+
+    fun addToWatched(customDate: DateSelectionResult? = null) {
+        if (movieState.value == null ||
+            loadingState.value.isLoading ||
+            loadingProgress.value.isLoading ||
+            loadingLists.value.isLoading
+        ) {
+            return
+        }
+
+        viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+
+            try {
+                loadingProgress.update { Loading }
+
+                val response = updateMovieHistoryUseCase.addToWatched(
+                    movieId = movieId,
+                    customDate = customDate,
+                )
+                loadProgressUseCase.loadMoviesProgress()
+
+                userWatchlistLocalSource.removeMovies(ids = setOf(movieId))
+                userWatchlistMinLocalSource.removeMovies(ids = setOf(movieId))
+
+                dataChanges.notify(Kind.Watchlist)
+                dataChanges.notify(Kind.History, origin = origin)
+
+                if (response.added.movies != 0) {
+                    movieProgressState.update {
+                        it?.copy(
+                            plays = it.plays + 1,
+                            inWatchlist = false,
+                        )
+                    }
+                    infoState.update {
+                        DynamicStringResource(R.string.text_info_history_added)
+                    }
+                }
+
+                analytics.progress.logAddWatchedMedia(
+                    mediaType = "movie",
+                    source = "movie_details",
+                    date = customDate?.analyticsStrings,
+                )
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingProgress.update { Done }
+            }
+        }
+    }
+
+    fun removeFromWatched() {
+        if (movieState.value == null ||
+            loadingState.value.isLoading ||
+            loadingProgress.value.isLoading ||
+            loadingLists.value.isLoading
+        ) {
+            return
+        }
+
+        viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+            try {
+                loadingProgress.update { Loading }
+
+                updateMovieHistoryUseCase.removeAllFromHistory(movieId)
+                loadProgressUseCase.loadMoviesProgress()
+
+                movieProgressState.update {
+                    it?.copy(
+                        plays = 0,
+                    )
+                }
+                dataChanges.notify(Kind.History, origin = origin)
+
+                infoState.update {
+                    DynamicStringResource(R.string.text_info_history_removed)
+                }
+                analytics.progress.logRemoveWatchedMedia(
+                    mediaType = "movie",
+                    source = "movie_details",
+                )
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingProgress.update { Done }
+            }
+        }
+    }
+
+    // Watchlist
+
+    fun toggleWatchlist() {
+        if (movieState.value == null ||
+            loadingState.value.isLoading ||
+            loadingProgress.value.isLoading ||
+            loadingLists.value.isLoading
+        ) {
+            return
+        }
+
+        if (movieProgressState.value?.inWatchlist == true) {
+            removeFromWatchlist()
+        } else {
+            addToWatchlist()
+        }
+    }
+
+    private fun addToWatchlist() {
+        viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+            try {
+                loadingLists.update { Loading }
+
+                updateMovieWatchlistUseCase.addToWatchlist(movieId)
+                userWatchlistLocalSource.addMovies(
+                    movies = listOf(
+                        WatchlistItem.MovieItem(
+                            rank = 0,
+                            movie = movieState.value!!,
+                            listedAt = nowUtcInstant(),
+                        ),
+                    ),
+                )
+                userWatchlistMinLocalSource.addMovies(
+                    movies = setOf(movieId),
+                )
+
+                dataChanges.notify(Kind.Watchlist)
+
+                movieProgressState.update {
+                    it?.copy(
+                        inWatchlist = true,
+                    )
+                }
+
+                appReviewUseCase.incrementCount()
+                analytics.progress.logAddWatchlistMedia(
+                    mediaType = "movie",
+                    source = "movie_details",
+                )
+
+                infoState.update {
+                    DynamicStringResource(R.string.text_info_watchlist_added)
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    when (error.getHttpCode()) {
+                        HTTP_ERROR_TRAKT_VIP_LIMIT -> {
+                            errorsManager.tryEmit(error)
+                        }
+                        else -> {
+                            errorState.update { error }
+                            Timber.recordError(error)
+                        }
+                    }
+                }
+            } finally {
+                loadingLists.update { Done }
+            }
+        }
+    }
+
+    private fun removeFromWatchlist() {
+        viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+            try {
+                loadingLists.update { Loading }
+
+                updateMovieWatchlistUseCase.removeFromWatchlist(movieId)
+                userWatchlistLocalSource.removeMovies(ids = setOf(movieId))
+                userWatchlistMinLocalSource.removeMovies(ids = setOf(movieId))
+
+                dataChanges.notify(Kind.Watchlist)
+
+                refreshLists()
+
+                infoState.update {
+                    DynamicStringResource(R.string.text_info_watchlist_removed)
+                }
+                analytics.progress.logRemoveWatchlistMedia(
+                    mediaType = "movie",
+                    source = "movie_details",
+                )
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingLists.update { Done }
+            }
+        }
+    }
+
+    // Lists
+
+    private suspend fun refreshLists() {
+        try {
+            coroutineScope {
+                val watchlistAsync = async {
+                    if (!loadWatchlistUseCase.isMoviesLoaded()) {
+                        loadWatchlistUseCase.loadWatchlist()
+                    }
+                    loadWatchlistUseCase.loadLocalMovies()
+                }
+                val listsAsync = async {
+                    if (!loadListsUseCase.isLoaded()) {
+                        loadListsUseCase.loadLists()
+                    }
+                    loadListsUseCase.loadLocalLists()
+                }
+
+                val watchlist = watchlistAsync.await()
+                val lists = listsAsync.await()
+
+                movieProgressState.update {
+                    it?.copy(
+                        inWatchlist = watchlist.contains(movieId),
+                        inLists = lists.isNotEmpty(),
+                    )
+                }
+            }
+        } catch (error: Exception) {
+            error.rethrowCancellation {
+                errorState.update { error }
+                Timber.recordError(error)
+            }
+        }
+    }
+
+    // Favorites
+
+    fun toggleFavorite(add: Boolean) {
+        if (movieState.value == null ||
+            loadingFavorite.value.isLoading
+        ) {
+            return
+        }
+
+        when {
+            add -> addToFavorites()
+            else -> removeFromFavorites()
+        }
+    }
+
+    private fun addToFavorites() {
+        viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+
+            try {
+                loadingFavorite.update { Loading }
+
+                delay(300.milliseconds) // Small delay to allow UI to settle.
+                updateMovieFavoritesUseCase.addToFavorites(movieId)
+                userFavoritesLocalSource.addMovies(
+                    movies = listOf(
+                        FavoriteItem.MovieItem(
+                            rank = 0,
+                            movie = movieState.value!!,
+                            listedAt = nowUtcInstant(),
+                        ),
+                    ),
+                )
+                dataChanges.notify(Kind.Favorites)
+
+                movieUserRatingsState.update {
+                    it?.copy(
+                        rating = it.rating?.copy(
+                            favorite = true,
+                        ),
+                    ) ?: UserRatingsState(
+                        rating = UserRating(
+                            mediaId = movieId,
+                            mediaType = Movie,
+                            rating = 0,
+                            favorite = true,
+                        ),
+                    )
+                }
+
+                analytics.ratings.logFavoriteAdd(
+                    mediaType = "movie",
+                )
+                infoState.update {
+                    DynamicStringResource(R.string.text_info_favorites_added)
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingFavorite.update { Done }
+            }
+        }
+    }
+
+    private fun removeFromFavorites() {
+        viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+
+            try {
+                loadingFavorite.update { Loading }
+
+                delay(300.milliseconds) // Small delay to allow UI to settle.
+                updateMovieFavoritesUseCase.removeFromFavorites(movieId)
+                userFavoritesLocalSource.removeMovies(setOf(movieId))
+                dataChanges.notify(Kind.Favorites)
+
+                movieUserRatingsState.update {
+                    it?.copy(
+                        rating = it.rating?.copy(
+                            favorite = false,
+                        ),
+                    ) ?: UserRatingsState(
+                        rating = UserRating(
+                            mediaId = movieId,
+                            mediaType = Movie,
+                            rating = 0,
+                            favorite = false,
+                        ),
+                    )
+                }
+
+                analytics.ratings.logFavoriteRemove(
+                    mediaType = "movie",
+                    source = "movie_details",
+                )
+                infoState.update {
+                    DynamicStringResource(R.string.text_info_favorites_removed)
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingFavorite.update { Done }
+            }
+        }
+    }
+
+    // Ratings
+
+    fun addRating(newRating: Int) {
+        ratingJob?.cancel()
+        ratingJob = viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+
+            val currentRating = movieUserRatingsState.value?.rating?.rating
+            if (currentRating == newRating) {
+                Timber.d("Rating is already $newRating, skipping update")
+                return@launch
+            }
+
+            movieUserRatingsState.update {
+                UserRatingsState(
+                    rating = UserRating(
+                        mediaId = movieId,
+                        mediaType = Movie,
+                        rating = newRating,
+                        favorite = it?.rating?.favorite == true,
+                    ),
+                    loading = Done,
+                )
+            }
+
+            PostRatingWorker.scheduleOneTime(
+                appContext = appContext,
+                mediaId = movieId,
+                mediaType = Movie,
+                rating = newRating,
+                origin = origin,
+            )
+        }
+    }
+
+    fun removeRating() {
+        ratingJob?.cancel()
+        ratingJob = viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+
+            if (movieUserRatingsState.value?.rating?.rating == 0) {
+                Timber.d("Rating is already 0, skipping removal")
+                return@launch
+            }
+
+            movieUserRatingsState.update {
+                UserRatingsState(
+                    rating = UserRating(
+                        mediaId = movieId,
+                        mediaType = Movie,
+                        rating = 0,
+                        favorite = it?.rating?.favorite == true,
+                    ),
+                    loading = Done,
+                )
+            }
+
+            PostRatingWorker.scheduleOneTime(
+                appContext = appContext,
+                mediaId = movieId,
+                mediaType = Movie,
+                rating = 0, // A rating of 0 indicates removal of rating
+                origin = origin,
+            )
+        }
+    }
+
+    // Misc
+
+    fun logTrailer() {
+        val movie = movieState.value ?: return
+        analytics.playback.logTrailer(movie.ids.slug.value)
+    }
+
+    fun logLightsaber(ignited: Boolean) {
+        analytics.logLightsaber(ignited = ignited, mediaType = "movie")
+    }
+
+    fun logExtra(extra: ExtraVideo) {
+        val movie = movieState.value ?: return
+        analytics.playback.logExtras(slug = movie.ids.slug.value, type = extra.type)
+    }
+
+    fun clearInfo() {
+        infoState.update { null }
+    }
+
+    fun logShare() {
+        analytics.logShare(source = "media", type = MediaType.Movie.value)
+    }
+
+    fun onVipUpsellSeen() {
+        analytics.vip.logUpsellImpression("movie-details")
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    val state = combine(
+        movieState,
+        movieRatingsState,
+        movieCreatorState,
+        movieProgressState,
+        movieUserRatingsState,
+        movieTranslationState,
+        movieSocialsState,
+        loadingState,
+        loadingProgress,
+        loadingLists,
+        loadingFavorite,
+        infoState,
+        errorState,
+        userState,
+        lightsaberState,
+    ) { state ->
+        MovieDetailsState(
+            movie = state[0] as Movie?,
+            movieRatings = state[1] as ExternalRating?,
+            movieCreator = state[2] as Person?,
+            movieProgress = state[3] as MovieDetailsState.ProgressState?,
+            movieUserRating = state[4] as UserRatingsState?,
+            movieTranslation = state[5] as MediaTranslation?,
+            movieSocials = state[6] as ImmutableList<MediaSocialActivity>?,
+            loading = state[7] as LoadingState,
+            loadingProgress = state[8] as LoadingState,
+            loadingLists = state[9] as LoadingState,
+            loadingFavorite = state[10] as LoadingState,
+            info = state[11] as StringResource?,
+            error = state[12] as Exception?,
+            user = state[13] as User?,
+            lightsaber = state[14] as Boolean,
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = initialState,
+    )
+}

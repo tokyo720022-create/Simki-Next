@@ -1,0 +1,258 @@
+package tv.trakt.trakt
+
+import android.app.Application
+import android.app.NotificationManager
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
+import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
+import com.google.firebase.crashlytics.crashlytics
+import com.google.firebase.remoteconfig.remoteConfig
+import com.google.firebase.remoteconfig.remoteConfigSettings
+import com.jakewharton.processphoenix.ProcessPhoenix
+import org.koin.android.ext.android.inject
+import org.koin.android.ext.koin.androidContext
+import org.koin.android.ext.koin.androidLogger
+import org.koin.androidx.workmanager.koin.workManagerFactory
+import org.koin.core.context.startKoin
+import timber.log.Timber
+import tv.trakt.trakt.app.TvActivity
+import tv.trakt.trakt.common.auth.di.commonAuthModule
+import tv.trakt.trakt.common.core.streamings.di.streamingsDataModule
+import tv.trakt.trakt.common.core.streamings.di.streamingsModule
+import tv.trakt.trakt.common.core.sync.changes.di.dataChangesModule
+import tv.trakt.trakt.common.core.translations.di.translationsModule
+import tv.trakt.trakt.common.core.tutorials.di.tutorialsModule
+import tv.trakt.trakt.common.data.local.di.localSourcesModule
+import tv.trakt.trakt.common.data.remote.di.remoteSourcesModule
+import tv.trakt.trakt.common.firebase.analytics.di.analyticsModule
+import tv.trakt.trakt.common.firebase.inappreview.di.inAppReviewModule
+import tv.trakt.trakt.common.helpers.coil.coilModule
+import tv.trakt.trakt.common.helpers.coil.registerCoilImageLoader
+import tv.trakt.trakt.common.helpers.extensions.isTelevision
+import tv.trakt.trakt.common.helpers.lifecycle.AppLifecycleProvider
+import tv.trakt.trakt.common.helpers.lifecycle.AppLifecycleProvider.State.BACKGROUND
+import tv.trakt.trakt.common.helpers.lifecycle.AppLifecycleProvider.State.FOREGROUND
+import tv.trakt.trakt.common.networking.di.networkingApiModule
+import tv.trakt.trakt.common.networking.di.networkingModule
+import tv.trakt.trakt.core.applinks.di.appLinksModule
+import tv.trakt.trakt.core.auth.di.authModule
+import tv.trakt.trakt.core.billing.di.billingModule
+import tv.trakt.trakt.core.calendar.di.calendarModule
+import tv.trakt.trakt.core.checkin.di.checkInModule
+import tv.trakt.trakt.core.comments.di.commentsDataModule
+import tv.trakt.trakt.core.comments.di.commentsModule
+import tv.trakt.trakt.core.discover.di.discoverModule
+import tv.trakt.trakt.core.filters.di.filtersModule
+import tv.trakt.trakt.core.home.di.homeDataModule
+import tv.trakt.trakt.core.home.di.homeModule
+import tv.trakt.trakt.core.inreview.di.inReviewModule
+import tv.trakt.trakt.core.klipy.di.gifPickerModule
+import tv.trakt.trakt.core.lists.di.listsDataModule
+import tv.trakt.trakt.core.lists.di.listsModule
+import tv.trakt.trakt.core.main.di.mainModule
+import tv.trakt.trakt.core.movies.di.moviesModule
+import tv.trakt.trakt.core.notifications.TraktNotificationChannel
+import tv.trakt.trakt.core.notifications.TraktNotificationChannelGroup
+import tv.trakt.trakt.core.notifications.TraktNotificationChannelGroup.CHECK_IN
+import tv.trakt.trakt.core.notifications.TraktNotificationChannelGroup.MEDIA
+import tv.trakt.trakt.core.notifications.TraktNotificationChannelGroup.RECAP
+import tv.trakt.trakt.core.notifications.di.notificationsModule
+import tv.trakt.trakt.core.people.di.peopleModule
+import tv.trakt.trakt.core.profile.di.profileDataModule
+import tv.trakt.trakt.core.profile.di.profileModule
+import tv.trakt.trakt.core.ratings.di.ratingsDataModule
+import tv.trakt.trakt.core.ratings.di.ratingsModule
+import tv.trakt.trakt.core.reactions.di.reactionsModule
+import tv.trakt.trakt.core.report.di.reportModule
+import tv.trakt.trakt.core.search.di.searchDataModule
+import tv.trakt.trakt.core.search.di.searchModule
+import tv.trakt.trakt.core.settings.di.settingsDataModule
+import tv.trakt.trakt.core.settings.di.settingsModule
+import tv.trakt.trakt.core.share.di.shareModule
+import tv.trakt.trakt.core.shows.di.showsModule
+import tv.trakt.trakt.core.streamings.di.allStreamingsModule
+import tv.trakt.trakt.core.summary.credits.di.allCreditsModule
+import tv.trakt.trakt.core.summary.episodes.di.episodeDetailsModule
+import tv.trakt.trakt.core.summary.movies.di.movieDetailsModule
+import tv.trakt.trakt.core.summary.people.di.personDetailsModule
+import tv.trakt.trakt.core.summary.sentiment.di.sentimentModule
+import tv.trakt.trakt.core.summary.shows.di.showDetailsModule
+import tv.trakt.trakt.core.summary.social.di.mediaSocialActivityModule
+import tv.trakt.trakt.core.sync.di.syncModule
+import tv.trakt.trakt.core.today.di.todayDataModule
+import tv.trakt.trakt.core.today.di.todayModule
+import tv.trakt.trakt.core.trivia.di.triviaModule
+import tv.trakt.trakt.core.userprofile.di.userProfileModule
+import tv.trakt.trakt.helpers.player.di.youTubePlayerModule
+import tv.trakt.trakt.ui.components.dateselection.otherdatepicker.di.otherDatePickerModule
+import tv.trakt.trakt.widgets.di.widgetsModule
+import java.util.concurrent.TimeUnit.MINUTES
+import tv.trakt.trakt.common.R as RCommon
+
+internal class TraktApplication : Application() {
+    private val appLifecycleProvider by lazy {
+        inject<AppLifecycleProvider>()
+    }
+
+    override fun onCreate() {
+        if (ProcessPhoenix.isPhoenixProcess(this)) {
+            return
+        }
+
+        super.onCreate()
+        setupKoin()
+        setupTimber()
+        setupNotificationChannels()
+        setupProcessLifecycle()
+
+        FirebaseApp.initializeApp(this)
+        setupFirebaseConfig()
+        setupFirebaseCrashlytics()
+
+        registerCoilImageLoader()
+    }
+
+    fun setupFirebaseCrashlytics() {
+        Firebase.crashlytics.isCrashlyticsCollectionEnabled = !BuildConfig.DEBUG
+    }
+
+    fun setupFirebaseConfig() {
+        with(Firebase.remoteConfig) {
+            setDefaultsAsync(RCommon.xml.remote_config_defaults)
+            setConfigSettingsAsync(
+                remoteConfigSettings {
+                    minimumFetchIntervalInSeconds = when {
+                        BuildConfig.DEBUG -> 0
+                        else -> MINUTES.toSeconds(5)
+                    }
+                },
+            )
+        }
+    }
+
+    fun setupKoin() {
+        if (isTelevision()) {
+            TvActivity.setupKoin(this)
+            return
+        }
+
+        startKoin {
+            androidContext(applicationContext)
+            androidLogger()
+
+            workManagerFactory()
+
+            modules(
+                networkingModule,
+                networkingApiModule,
+                coilModule,
+                mainModule,
+                appLinksModule,
+                authModule,
+                filtersModule,
+                tutorialsModule,
+                commonAuthModule,
+                calendarModule,
+                homeModule,
+                homeDataModule,
+                discoverModule,
+                dataChangesModule,
+                showsModule,
+                showDetailsModule,
+                episodeDetailsModule,
+                moviesModule,
+                movieDetailsModule,
+                mediaSocialActivityModule,
+                profileModule,
+                profileDataModule,
+                remoteSourcesModule,
+                localSourcesModule,
+                peopleModule,
+                personDetailsModule,
+                searchModule,
+                searchDataModule,
+                streamingsDataModule,
+                streamingsModule,
+                allStreamingsModule,
+                commentsDataModule,
+                commentsModule,
+                reportModule,
+                triviaModule,
+                sentimentModule,
+                allCreditsModule,
+                listsModule,
+                listsDataModule,
+                reactionsModule,
+                ratingsDataModule,
+                ratingsModule,
+                syncModule,
+                notificationsModule,
+                settingsModule,
+                settingsDataModule,
+                billingModule,
+                checkInModule,
+                inAppReviewModule,
+                analyticsModule,
+                translationsModule,
+                gifPickerModule,
+                userProfileModule,
+                youTubePlayerModule,
+                inReviewModule,
+                shareModule,
+                widgetsModule,
+                otherDatePickerModule,
+                todayDataModule,
+                todayModule,
+            )
+        }
+    }
+
+    private fun setupProcessLifecycle() {
+        val observer = AppLifecycleObserver(appLifecycleProvider.value)
+        ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
+    }
+
+    fun setupTimber() {
+        if (BuildConfig.DEBUG) {
+            Timber.plant(Timber.DebugTree())
+        }
+    }
+
+    fun setupNotificationChannels() {
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+
+        TraktNotificationChannelGroup.entries.forEach {
+            notificationManager
+                .createNotificationChannelGroup(it.createChannelGroup())
+        }
+
+        TraktNotificationChannel.entries.forEach { channel ->
+            notificationManager
+                .createNotificationChannel(
+                    channel.createChannel().apply {
+                        group = when (channel) {
+                            TraktNotificationChannel.CHECK_IN -> CHECK_IN.id
+                            TraktNotificationChannel.MONTH_REVIEW -> RECAP.id
+                            else -> MEDIA.id
+                        }
+                    },
+                )
+        }
+    }
+}
+
+private class AppLifecycleObserver(
+    private val appLifecycleProvider: AppLifecycleProvider,
+) : DefaultLifecycleObserver {
+    override fun onStart(owner: LifecycleOwner) {
+        Timber.d("App in foreground")
+        appLifecycleProvider.notify(FOREGROUND)
+    }
+
+    override fun onStop(owner: LifecycleOwner) {
+        appLifecycleProvider.notify(BACKGROUND)
+        Timber.d("App in background")
+    }
+}

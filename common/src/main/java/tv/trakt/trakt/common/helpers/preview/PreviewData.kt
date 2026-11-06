@@ -1,0 +1,305 @@
+package tv.trakt.trakt.common.helpers.preview
+
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
+import tv.trakt.trakt.common.helpers.extensions.nowLocalDay
+import tv.trakt.trakt.common.helpers.extensions.nowUtcInstant
+import tv.trakt.trakt.common.model.Comment
+import tv.trakt.trakt.common.model.CommentUserStats
+import tv.trakt.trakt.common.model.Episode
+import tv.trakt.trakt.common.model.EpisodeType
+import tv.trakt.trakt.common.model.Ids
+import tv.trakt.trakt.common.model.Images
+import tv.trakt.trakt.common.model.ImdbId
+import tv.trakt.trakt.common.model.MediaGenre
+import tv.trakt.trakt.common.model.MediaStatus
+import tv.trakt.trakt.common.model.Movie
+import tv.trakt.trakt.common.model.Person
+import tv.trakt.trakt.common.model.PostCreditsScene
+import tv.trakt.trakt.common.model.Rating
+import tv.trakt.trakt.common.model.Season
+import tv.trakt.trakt.common.model.Show
+import tv.trakt.trakt.common.model.SlugId
+import tv.trakt.trakt.common.model.TmdbId
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.common.model.lists.CustomList
+import tv.trakt.trakt.common.model.lists.CustomList.Type
+import tv.trakt.trakt.common.model.lists.CustomListMinimal
+import java.time.ZonedDateTime
+import java.time.temporal.ChronoUnit.DAYS
+import kotlin.time.Duration.Companion.minutes
+
+object PreviewData {
+    val show1 = Show(
+        ids = Ids(
+            trakt = TraktId(1),
+            slug = SlugId("slug2"),
+            tmdb = TmdbId(1),
+            imdb = ImdbId("tt1234562"),
+        ),
+        title = "Lorem Ipsum Sabat Matter",
+        titleOriginal = "Original Show Title",
+        overview = "This is a sample movie overview that provides a brief description of the movie's plot " +
+            "and main themes. It is intended to give viewers an idea of what to expect without revealing too much.",
+        year = 2024,
+        releasedAt = nowUtcInstant().plus(5, DAYS),
+        genres = listOf<MediaGenre>().toImmutableList(),
+        images = Images(
+            fanart = listOf(
+                "walter-r2.trakt.tv/images/shows/000/142/611/fanarts/medium/5248d0dfec.jpg.webp",
+            ).toImmutableList(),
+            logo = listOf(
+                "walter-r2.trakt.tv/images/shows/000/142/611/fanarts/medium/5248d0dfec.jpg.webp",
+            ).toImmutableList(),
+        ),
+        colors = null,
+        rating = Rating(
+            rating = 8.5f,
+            votes = 1234,
+        ),
+        certification = "PG-18",
+        runtime = 90.minutes,
+        totalRuntime = 1800.minutes,
+        trailer = "https://youtube.com/watch?v=abcdefg",
+        status = MediaStatus.Canceled,
+        airedEpisodes = 28,
+        country = "pl",
+        network = "Amazon",
+        languages = listOf("en", "de").toImmutableList(),
+    )
+
+    val show2 = show1.copy(
+        ids = show1.ids.copy(trakt = TraktId(2)),
+        titleOriginal = null,
+    )
+
+    val movie1 = Movie(
+        ids = Ids(
+            trakt = TraktId(1),
+            slug = SlugId("slug2"),
+            tmdb = TmdbId(1),
+            imdb = ImdbId("tt1234562"),
+        ),
+        title = "Movie Title",
+        titleOriginal = "Original Movie Title",
+        overview = "This is a sample movie overview that provides a brief description of the movie's plot " +
+            "and main themes. It is intended to give viewers an idea of what to expect without revealing too much.",
+        year = 2024,
+        released = nowLocalDay(),
+        genres = listOf(MediaGenre.Comedy).toImmutableList(),
+        images = Images(
+            poster = listOf(
+                "walter-r2.trakt.tv/images/movies/000/142/611/fanarts/medium/5248d0dfec.jpg.webp",
+            ).toImmutableList(),
+            fanart = listOf(
+                "walter-r2.trakt.tv/images/movies/000/142/611/fanarts/medium/5248d0dfec.jpg.webp",
+            ).toImmutableList(),
+        ),
+        colors = null,
+        rating = Rating(
+            rating = 8.5f,
+            votes = 1234,
+        ),
+        certification = "PG-18",
+        runtime = 90.minutes,
+        trailer = "https://youtube.com/watch?v=abcdefg",
+        status = MediaStatus.Canceled,
+        postCredits = persistentListOf(PostCreditsScene.During, PostCreditsScene.After),
+        country = "us",
+        languages = listOf("en", "de").toImmutableList(),
+    )
+
+    val movie2 = movie1.copy(
+        ids = movie1.ids.copy(trakt = TraktId(2)),
+        images = null,
+    )
+
+    val user1 = User(
+        ids = Ids(
+            trakt = TraktId(1),
+            slug = SlugId("john-doe"),
+            imdb = ImdbId("tt1234567"),
+            tmdb = TmdbId(67890),
+        ),
+        name = "John",
+        username = "johndoe69",
+        location = "New York, USA",
+        email = "mike@trakt",
+        isVip = false,
+        isVipEp = false,
+        isVipOg = false,
+        isDirector = false,
+        isPrivate = false,
+        images = null,
+        streamings = null,
+        settings = null,
+        about = "About John Doe: John is a movie enthusiast and avid TV show watcher. " +
+            "He enjoys exploring different genres and sharing his reviews with the community.",
+    )
+
+    val episode1 = Episode(
+        ids = Ids(
+            trakt = TraktId(1),
+            slug = SlugId("slug2"),
+            tmdb = TmdbId(1),
+            imdb = ImdbId("tt1234562"),
+        ),
+        number = 12,
+        season = 2,
+        title = "Some Episode Title",
+        numberAbs = null,
+        overview = "John Doe is a fictional character often used as a placeholder name in various contexts. " +
+            "He represents an average person and is commonly used in legal cases, examples, and discussions.",
+        rating = Rating(rating = 4.34f, votes = 5394),
+        commentCount = 4424,
+        runtime = 24.minutes,
+        type = null,
+        originalTitle = "Episode Original Title",
+        images = Images(
+            screenshot = listOf(
+                "walter-r2.trakt.tv/images/movies/000/142/611/fanarts/medium/5248d0dfec.jpg.webp",
+            ).toImmutableList(),
+        ),
+        firstAired = nowUtcInstant(),
+        effectiveReleaseDate = nowUtcInstant(),
+        updatedAt = nowUtcInstant(),
+    )
+
+    val newEpisode = episode1.copy(
+        ids = episode1.ids.copy(trakt = TraktId(2)),
+        firstAired = nowUtcInstant().minus(2, DAYS),
+        effectiveReleaseDate = nowUtcInstant().minus(2, DAYS),
+    )
+
+    val newPremiereEpisode = newEpisode.copy(
+        ids = episode1.ids.copy(trakt = TraktId(3)),
+        type = EpisodeType.SEASON_PREMIERE,
+    )
+
+    val newFinaleEpisode = newEpisode.copy(
+        ids = episode1.ids.copy(trakt = TraktId(4)),
+        type = EpisodeType.SEASON_FINALE,
+    )
+
+    val premiereEpisode = episode1.copy(
+        ids = episode1.ids.copy(trakt = TraktId(5)),
+        type = EpisodeType.SERIES_PREMIERE,
+        firstAired = nowUtcInstant().plus(3, DAYS),
+        effectiveReleaseDate = nowUtcInstant().plus(3, DAYS),
+    )
+
+    val finaleEpisode = premiereEpisode.copy(
+        ids = episode1.ids.copy(trakt = TraktId(6)),
+        type = EpisodeType.SERIES_FINALE,
+    )
+
+    val newMovie = movie1.copy(
+        ids = movie1.ids.copy(trakt = TraktId(3)),
+        released = nowLocalDay().minusDays(2),
+    )
+
+    val season1 = Season(
+        ids = Ids(
+            trakt = TraktId(1),
+            slug = SlugId("slug2"),
+            tmdb = TmdbId(1),
+            imdb = ImdbId("tt1234562"),
+        ),
+        number = 2,
+        rating = Rating(rating = 4.34f, votes = 5394),
+        episodeCount = 12,
+        images = Images(
+            poster = listOf(
+                "walter-r2.trakt.tv/images/movies/000/142/611/fanarts/medium/5248d0dfec.jpg.webp",
+            ).toImmutableList(),
+        ),
+        overview = "Lorem ipsum dolor sit amet",
+        firstAired = ZonedDateTime.now(),
+        updatedAt = ZonedDateTime.now(),
+    )
+
+    val customList1 = CustomList(
+        ids = Ids(
+            trakt = TraktId(1),
+            slug = SlugId("my-custom-list"),
+        ),
+        name = "My Custom List",
+        description = "This is a custom list that contains movies and shows curated by the user. " +
+            "It allows for personalized organization of content.",
+        privacy = CustomList.Privacy.Public,
+        displayNumbers = true,
+        allowComments = true,
+        createdAt = ZonedDateTime.now(),
+        updatedAt = ZonedDateTime.now(),
+        shareLink = "",
+        type = Type.Official,
+        likes = 12,
+        itemCount = 42,
+        images = null,
+        user = user1,
+    )
+
+    val customListMinimal1 = CustomListMinimal(
+        id = TraktId(1),
+        ownerId = TraktId(1),
+        name = "My Custom List",
+        type = "official",
+        itemsCount = 42,
+        displayOrder = 1,
+    )
+
+    val comment1 = Comment(
+        id = 1,
+        parentId = 0,
+        createdAt = ZonedDateTime.now(),
+        updatedAt = ZonedDateTime.now(),
+        comment = "This is a sample comment that provides feedback or discussion about a movie, show, or episode. " +
+            "It is intended to give viewers an idea of what others think without revealing too much.",
+        isSpoiler = false,
+        isReview = false,
+        replies = 23,
+        likes = 12450,
+        userRating = 2,
+        userStats = CommentUserStats(
+            playCount = 3,
+            completedCount = 1,
+            rating = 2,
+        ),
+        language = null,
+        user = user1,
+        gif = null,
+    )
+
+    val person1 = Person(
+        name = "John Doe",
+        ids = Ids(
+            trakt = TraktId(1),
+            slug = SlugId("john-doe"),
+            imdb = ImdbId("tt1234567"),
+            tmdb = TmdbId(67890),
+        ),
+        knownForDepartment = "Acting",
+        birthday = nowLocalDay().minusYears(32),
+        heightCm = 179F,
+        birthplace = "Los Angeles, California, USA",
+        biography = "John Doe is a fictional character often used as a placeholder name in various contexts. " +
+            "He represents an average person and is commonly used in legal cases, examples, and discussions.",
+        images = Images(
+            headshot = listOf("walter-r2.trakt.tv/images/people/000/414/068/headshots/thumb/85af40e2cb.jpg.webp")
+                .toImmutableList(),
+        ),
+        socialIds = null,
+    )
+
+    val person2 = person1.copy(
+        ids = person1.ids.copy(trakt = TraktId(2)),
+    )
+
+    val deceasedPerson = person1.copy(
+        ids = person1.ids.copy(trakt = TraktId(3)),
+        name = "Jane Doe",
+        birthday = nowLocalDay().minusYears(80),
+        death = nowLocalDay().minusYears(5),
+    )
+}

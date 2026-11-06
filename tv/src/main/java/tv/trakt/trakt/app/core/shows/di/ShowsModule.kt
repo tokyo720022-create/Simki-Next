@@ -1,0 +1,91 @@
+package tv.trakt.trakt.app.core.shows.di
+
+import org.koin.core.module.dsl.viewModel
+import org.koin.dsl.module
+import tv.trakt.trakt.app.core.shows.ShowsViewModel
+import tv.trakt.trakt.app.core.shows.features.anticipated.ShowsAnticipatedViewAllViewModel
+import tv.trakt.trakt.app.core.shows.features.popular.ShowsPopularViewAllViewModel
+import tv.trakt.trakt.app.core.shows.features.releases.ShowsReleasesViewAllViewModel
+import tv.trakt.trakt.app.core.shows.features.trending.ShowsTrendingViewAllViewModel
+import tv.trakt.trakt.app.core.shows.usecase.GetAnticipatedShowsUseCase
+import tv.trakt.trakt.app.core.shows.usecase.GetPopularShowsUseCase
+import tv.trakt.trakt.app.core.shows.usecase.GetRecommendedShowsUseCase
+import tv.trakt.trakt.app.core.shows.usecase.GetReleasesShowsUseCase
+import tv.trakt.trakt.app.core.shows.usecase.GetTrendingShowsUseCase
+
+internal val showsModule = module {
+    factory {
+        GetTrendingShowsUseCase(
+            remoteSource = get(),
+            localSource = get(),
+        )
+    }
+
+    factory {
+        GetPopularShowsUseCase(
+            remoteSource = get(),
+            localSource = get(),
+        )
+    }
+
+    factory {
+        GetAnticipatedShowsUseCase(
+            remoteSource = get(),
+            localSource = get(),
+        )
+    }
+
+    factory {
+        GetRecommendedShowsUseCase(
+            remoteSource = get(),
+            localSource = get(),
+        )
+    }
+
+    factory {
+        GetReleasesShowsUseCase(
+            remoteSource = get(),
+            localShowSource = get(),
+            localEpisodeSource = get(),
+        )
+    }
+
+    viewModel {
+        ShowsViewModel(
+            getTrendingShowsUseCase = get(),
+            getPopularShowsUseCase = get(),
+            getAnticipatedShowsUseCase = get(),
+            getReleasesShowsUseCase = get(),
+            sessionManager = get(),
+            appLifecycleProvider = get(),
+            collectionStateProvider = get(),
+        )
+    }
+
+    viewModel {
+        ShowsReleasesViewAllViewModel(
+            getItemsUseCase = get(),
+        )
+    }
+
+    viewModel {
+        ShowsTrendingViewAllViewModel(
+            getItemsUseCase = get(),
+            collectionStateProvider = get(),
+        )
+    }
+
+    viewModel {
+        ShowsPopularViewAllViewModel(
+            getItemsUseCase = get(),
+            collectionStateProvider = get(),
+        )
+    }
+
+    viewModel {
+        ShowsAnticipatedViewAllViewModel(
+            getItemsUseCase = get(),
+            collectionStateProvider = get(),
+        )
+    }
+}

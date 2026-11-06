@@ -1,0 +1,33 @@
+package tv.trakt.trakt.core.main
+
+import androidx.compose.runtime.Immutable
+import com.google.android.play.core.ktx.AppUpdateResult
+import tv.trakt.trakt.common.helpers.LoadingState
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.core.checkin.model.CheckInState
+import tv.trakt.trakt.core.ratings.rateprompt.model.RatePromptState
+
+@Immutable
+internal data class MainState(
+    val user: User? = null,
+    val userVipStatus: Pair<Boolean?, Boolean?>? = null,
+    val userLoading: LoadingState = LoadingState.Idle,
+    val checkIn: CheckInState? = null,
+    val ratePrompt: RatePromptState? = null,
+    val welcome: WelcomeState = WelcomeState(),
+    val review: Boolean? = null,
+    val installPrompt: Boolean = false,
+    val yearInReviewUrl: String? = null,
+    val paywall: Boolean? = null,
+    val update: AppUpdateResult? = null,
+    val error: Exception? = null,
+) {
+    @Immutable
+    data class WelcomeState(
+        val welcome: Boolean = false,
+        val onboarding: Boolean = false,
+    ) {
+        val isActive: Boolean
+            get() = welcome || onboarding
+    }
+}

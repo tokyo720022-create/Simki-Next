@@ -1,0 +1,550 @@
+package tv.trakt.trakt.core.ratings.ui
+
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Alignment.Companion.CenterHorizontally
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import org.koin.compose.koinInject
+import tv.trakt.trakt.common.core.tutorials.StubTutorialsManager
+import tv.trakt.trakt.common.core.tutorials.TutorialsManager
+import tv.trakt.trakt.common.core.tutorials.model.TutorialKey
+import tv.trakt.trakt.common.helpers.extensions.DevicePreview
+import tv.trakt.trakt.common.helpers.extensions.onClick
+import tv.trakt.trakt.common.model.ratings.UserRating
+import tv.trakt.trakt.common.ui.theme.colors.Red500
+import tv.trakt.trakt.helpers.extensions.TraktThemeLightDark
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.theme.TraktTheme
+import kotlin.math.abs
+
+private val ItemsSpacing = 10.dp
+
+@Composable
+internal fun UserRatingBar(
+    modifier: Modifier = Modifier,
+    key: String? = null,
+    rating: Int? = null,
+    favorite: Boolean = false,
+    favoriteVisible: Boolean = true,
+    favoriteLoading: Boolean = false,
+    size: Dp = 23.dp,
+    spacing: Dp = 8.dp,
+    textSpacing: Dp = 44.dp,
+    topPadding: Dp = 22.dp,
+    separatorVisible: Boolean = false,
+    onRatingDrag: (Boolean) -> Unit = {},
+    onRatingClick: (Int) -> Unit = {},
+    onRatingRemoveClick: () -> Unit = {},
+    onFavoriteClick: () -> Unit = {},
+) {
+    val scope = rememberCoroutineScope()
+    val context = LocalResources.current
+    val haptic = LocalHapticFeedback.current
+    val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val tutorials = when {
+        LocalInspectionMode.current -> StubTutorialsManager()
+        else -> koinInject<TutorialsManager>()
+    }
+
+    val stars = remember(rating) {
+        rating?.div(2f) ?: 0f
+    }
+
+    var isDragging by remember { mutableStateOf(false) }
+    var dragStars by remember { mutableFloatStateOf(0f) }
+    val displayStars = if (isDragging) dragStars else stars
+
+    var dragActiveIndex by remember { mutableIntStateOf(-1) }
+
+    val scaleAnimation = remember { Animatable(1f) }
+    val lastClickedIndex = remember { mutableIntStateOf(-1) }
+
+    var favoriteDelightId by remember { mutableIntStateOf(0) }
+    var favoriteDelightPending by remember { mutableStateOf(false) }
+    // Plays only once a user-initiated add is confirmed, not when an existing favorite loads.
+    LaunchedEffect(favorite, favoriteDelightPending) {
+        if (!favorite || !favoriteDelightPending) return@LaunchedEffect
+        favoriteDelightPending = false
+        favoriteDelightId++
+    }
+
+    val density = LocalDensity.current
+    val starSizePx = with(density) { size.toPx() }
+    val spacingPx = with(density) { 8.dp.toPx() }
+    val starsWidth = 5 * starSizePx
+    val totalWidth = 5 * starSizePx + 4 * spacingPx
+    val activeLiftPx = with(density) { 12.dp.toPx() }
+
+    var activeDelight by remember { mutableStateOf<ActiveDelight?>(null) }
+
+    fun starCenter(index: Int): Offset {
+        val ltrX = index * (starSizePx + spacingPx) + starSizePx / 2
+        return Offset(
+            x = if (isRtl) totalWidth - ltrX else ltrX,
+            y = starSizePx / 2,
+        )
+    }
+
+    fun commitRating(finalRating: Float) {
+        val starIndex = (finalRating - 0.5f).toInt().coerceIn(0, 4)
+        if (finalRating == 0f) {
+            onRatingRemoveClick()
+        } else {
+            val rating = UserRating.scaleTo10(finalRating)
+            onRatingClick(rating)
+            activeDelight = ratingDelight(rating)?.let { delight ->
+                ActiveDelight(
+                    delight = delight,
+                    origin = starCenter(starIndex),
+                    id = (activeDelight?.id ?: 0) + 1,
+                )
+            }
+        }
+
+        lastClickedIndex.intValue = starIndex
+        runScaleAnimation(
+            scope = scope,
+            animation = scaleAnimation,
+        )
+    }
+
+    val tutorialX = remember { Animatable(0f) }
+    val tutorialAlpha = remember { Animatable(0f) }
+    var tutorialDone by remember { mutableStateOf(false) }
+
+    val animatedAlpha: Float by animateFloatAsState(
+        when {
+            favoriteVisible && !favoriteLoading -> 1f
+            favoriteVisible && favoriteLoading -> 0.5f
+            else -> 0.0f
+        },
+        animationSpec = tween(350, delayMillis = 200),
+        label = "alpha",
+    )
+
+    var ratingAlphaMaskActive by remember { mutableStateOf(false) }
+    val ratingAlphaMask: Float by animateFloatAsState(
+        targetValue = if (ratingAlphaMaskActive) 0.05F else 1F,
+        animationSpec = tween(150),
+        label = "alpha",
+    )
+
+    val favoriteAlpha = if (ratingAlphaMaskActive) ratingAlphaMask else animatedAlpha
+    val showSeparator = favoriteVisible && separatorVisible
+
+    // Shifts the drag label left so it stays centered over the stars, not the whole row.
+    val favoriteOffset = when {
+        showSeparator -> (ItemsSpacing * 2 + RatingSeparatorWidth + size) / 2
+        else -> (ItemsSpacing + size) / 2
+    }
+
+    LaunchedEffect(Unit) {
+        tutorialDone = tutorials.get(TutorialKey.RATING_BAR_SWIPE)
+    }
+
+    Box(
+        modifier = modifier.padding(top = topPadding),
+    ) {
+        if (ratingAlphaMaskActive) {
+            val ratingText = if (dragStars == 0f) {
+                stringResource(R.string.text_no_rating)
+            } else {
+                val numText = dragStars.toString().removeSuffix(".0")
+                val slugText = UserRating.getSlug(dragStars, context)
+                "$numText • $slugText"
+            }
+
+            Text(
+                text = ratingText,
+                textAlign = TextAlign.Center,
+                color = TraktTheme.colors.textPrimary,
+                style = TraktTheme.typography.meta.copy(
+                    fontSize = 13.sp,
+                ),
+                modifier = Modifier
+                    .matchParentSize()
+                    .wrapContentSize(unbounded = true)
+                    .graphicsLayer {
+                        if (favoriteVisible) {
+                            translationX = -favoriteOffset.toPx()
+                        }
+                        translationY = -textSpacing.toPx()
+                    },
+            )
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = spacedBy(ItemsSpacing, CenterHorizontally),
+        ) {
+            Box {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = spacedBy(spacing, CenterHorizontally),
+                    modifier = Modifier
+                        .pointerInput(key ?: Unit, isRtl) {
+                            val starUnit = starSizePx + spacingPx
+
+                            fun toLtrX(x: Float): Float = if (isRtl) totalWidth - x else x
+
+                            fun xToStars(rawX: Float): Float {
+                                val x = toLtrX(rawX)
+                                if (x < 0f) return 0f
+                                val clampedX = x.coerceIn(0f, totalWidth)
+                                val starIndex = (clampedX / starUnit).toInt().coerceIn(0, 4)
+                                val posInUnit = clampedX - starIndex * starUnit
+
+                                val ratingInStar = when {
+                                    posInUnit < starSizePx / 2 -> 0.5f
+                                    else -> 1.0f
+                                }
+
+                                return (starIndex + ratingInStar).coerceIn(0.5f, 5f)
+                            }
+
+                            fun xToIndex(rawX: Float): Int {
+                                val x = toLtrX(rawX)
+                                if (x < 0f) return -1
+                                val clampedX = x.coerceIn(0f, totalWidth)
+                                return (clampedX / starUnit).toInt().coerceIn(0, 4)
+                            }
+
+                            val touchSlop = viewConfiguration.touchSlop
+
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                val startPosition = down.position
+
+                                // Wait for direction to be determined
+                                var activationX = startPosition.x
+                                var dragActivated = false
+                                var verticalScrollDetected = false
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes
+                                        .firstOrNull { it.id == down.id } ?: break
+                                    if (!change.pressed) break
+
+                                    val dx = abs(
+                                        change.position.x - startPosition.x,
+                                    )
+                                    val dy = abs(
+                                        change.position.y - startPosition.y,
+                                    )
+
+                                    if (dx > touchSlop) {
+                                        change.consume()
+                                        activationX = change.position.x
+                                        dragActivated = true
+                                        break
+                                    }
+                                    if (dy > touchSlop) {
+                                        // vertical scroll wins
+                                        verticalScrollDetected = true
+                                        break
+                                    }
+                                }
+
+                                if (!dragActivated) {
+                                    val tappedIndex = xToIndex(startPosition.x)
+                                    if (!verticalScrollDetected && tappedIndex >= 0) {
+                                        commitRating((tappedIndex + 1).toFloat())
+                                    }
+                                    if (!tutorialDone && !verticalScrollDetected) {
+                                        scope.launch {
+                                            tutorialX.snapTo(starSizePx)
+                                            tutorialAlpha.snapTo(0f)
+                                            launch {
+                                                delay(400)
+                                                tutorialX.animateTo(
+                                                    targetValue = starsWidth,
+                                                    animationSpec = tween(500, easing = LinearEasing),
+                                                )
+                                            }
+                                            tutorialAlpha.animateTo(
+                                                targetValue = 1f,
+                                                animationSpec = tween(300),
+                                            )
+                                            delay(800)
+                                            tutorialAlpha.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = tween(300),
+                                            )
+                                        }
+                                    }
+                                    return@awaitEachGesture
+                                }
+
+                                isDragging = true
+                                onRatingDrag(true)
+                                ratingAlphaMaskActive = true
+                                dragStars = xToStars(activationX)
+                                dragActiveIndex = xToIndex(activationX)
+
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    if (event.changes.all { !it.pressed }) break
+                                    event.changes.forEach { change ->
+                                        val stepStars = xToStars(change.position.x)
+                                        if (stepStars != dragStars) {
+                                            haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                                        }
+                                        dragStars = stepStars
+                                        dragActiveIndex = xToIndex(change.position.x)
+                                        change.consume()
+                                    }
+                                }
+
+                                isDragging = false
+                                onRatingDrag(false)
+                                ratingAlphaMaskActive = false
+
+                                if (!tutorialDone) {
+                                    tutorialDone = true
+                                    scope.launch {
+                                        tutorials.acknowledge(TutorialKey.RATING_BAR_SWIPE)
+                                    }
+                                }
+
+                                dragActiveIndex = -1
+                                commitRating(dragStars)
+                            }
+                        },
+                ) {
+                    repeat(5) { index ->
+                        val distance = if (isDragging && dragActiveIndex >= 0) {
+                            abs(index - dragActiveIndex)
+                        } else {
+                            Int.MAX_VALUE
+                        }
+
+                        val elevationFraction = if (distance == 0) 1f else 0f
+
+                        val activeScale by animateFloatAsState(
+                            targetValue = 1f + 0.2f * elevationFraction,
+                            animationSpec = tween(200),
+                            label = "activeScale$index",
+                        )
+                        val activeTranslationY by animateFloatAsState(
+                            targetValue = -activeLiftPx * elevationFraction,
+                            animationSpec = tween(200),
+                            label = "activeTranslationY$index",
+                        )
+
+                        val bounceScale = when {
+                            lastClickedIndex.intValue == index -> scaleAnimation.value
+                            else -> 1f
+                        }
+
+                        Icon(
+                            painter = painterResource(
+                                when {
+                                    displayStars >= index + 1 -> R.drawable.ic_star_trakt_on
+                                    displayStars >= index + 0.5F -> R.drawable.ic_star_trakt_half
+                                    else -> R.drawable.ic_star_trakt_off
+                                },
+                            ),
+                            contentDescription = null,
+                            tint = TraktTheme.colors.textPrimary,
+                            modifier = Modifier
+                                .size(size)
+                                .graphicsLayer {
+                                    scaleX = activeScale * bounceScale
+                                    scaleY = activeScale * bounceScale
+                                    translationY = activeTranslationY
+                                },
+                        )
+                    }
+                }
+
+                activeDelight?.let { active ->
+                    RatingDelightOverlay(
+                        delight = active.delight,
+                        origin = active.origin,
+                        key = active.id,
+                        modifier = Modifier.matchParentSize(),
+                    )
+                }
+
+                if (!tutorialDone && tutorialAlpha.value > 0f) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_touch),
+                        contentDescription = null,
+                        tint = TraktTheme.colors.accentPalette.shade400,
+                        modifier = Modifier
+                            .size(size)
+                            .graphicsLayer {
+                                rotationZ = -45F
+                                translationX = tutorialX.value
+                                alpha = tutorialAlpha.value
+                            },
+                    )
+                }
+            }
+
+            if (showSeparator) {
+                RatingSeparator(
+                    modifier = Modifier.alpha(favoriteAlpha),
+                )
+            }
+
+            if (favoriteVisible) {
+                val scale = when {
+                    lastClickedIndex.intValue == -1 -> scaleAnimation.value
+                    else -> 1f
+                }
+                Box {
+                    Icon(
+                        painter = painterResource(
+                            when {
+                                favorite -> R.drawable.ic_heart_on
+                                else -> R.drawable.ic_heart_off
+                            },
+                        ),
+                        contentDescription = null,
+                        tint = if (favorite) Red500 else TraktTheme.colors.textPrimary,
+                        modifier = Modifier
+                            .size(size)
+                            .alpha(favoriteAlpha)
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                            }
+                            .onClick {
+                                if (!favoriteLoading) {
+                                    lastClickedIndex.intValue = -1
+                                    favoriteDelightPending = !favorite
+
+                                    onFavoriteClick()
+
+                                    runScaleAnimation(
+                                        scope = scope,
+                                        animation = scaleAnimation,
+                                    )
+                                }
+                            },
+                    )
+
+                    if (favoriteDelightId > 0) {
+                        RatingDelightOverlay(
+                            delight = RatingDelight.FavoriteGlow,
+                            origin = Offset(starSizePx / 2, starSizePx / 2),
+                            key = favoriteDelightId,
+                            modifier = Modifier.matchParentSize(),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class ActiveDelight(
+    val delight: RatingDelight,
+    val origin: Offset,
+    val id: Int,
+)
+
+private fun runScaleAnimation(
+    scope: CoroutineScope,
+    animation: Animatable<Float, AnimationVector1D>,
+) {
+    scope.launch {
+        animation.animateTo(
+            targetValue = 1f,
+            initialVelocity = 1f,
+            animationSpec = keyframes {
+                durationMillis = 350
+                1.2f at 100
+                0.9f at 250
+                1f at 350
+            },
+        )
+    }
+}
+
+@DevicePreview
+@Composable
+private fun Preview() {
+    TraktThemeLightDark {
+        UserRatingBar()
+    }
+}
+
+@DevicePreview
+@Composable
+private fun Preview2() {
+    TraktThemeLightDark {
+        UserRatingBar(
+            rating = 7,
+        )
+    }
+}
+
+@DevicePreview
+@Composable
+private fun PreviewSeparator() {
+    TraktThemeLightDark {
+        UserRatingBar(
+            favorite = true,
+            separatorVisible = true,
+            rating = 7,
+        )
+    }
+}
+
+@DevicePreview
+@Composable
+private fun Preview3() {
+    TraktThemeLightDark {
+        UserRatingBar(
+            favoriteVisible = true,
+            favoriteLoading = true,
+            rating = 7,
+        )
+    }
+}

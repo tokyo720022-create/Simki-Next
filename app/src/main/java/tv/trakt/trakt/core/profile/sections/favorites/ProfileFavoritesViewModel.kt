@@ -1,0 +1,255 @@
+package tv.trakt.trakt.core.profile.sections.favorites
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import timber.log.Timber
+import tv.trakt.trakt.common.auth.session.SessionManager
+import tv.trakt.trakt.common.core.favorites.FavoriteItem
+import tv.trakt.trakt.common.core.favorites.getFavoriteSorting
+import tv.trakt.trakt.common.core.sync.changes.DataChange.Kind
+import tv.trakt.trakt.common.core.sync.changes.DataChanges
+import tv.trakt.trakt.common.core.user.CollectionStateProvider
+import tv.trakt.trakt.common.core.user.UserCollectionState
+import tv.trakt.trakt.common.core.user.usecases.lists.LoadUserFavoritesUseCase
+import tv.trakt.trakt.common.data.local.MovieLocalSource
+import tv.trakt.trakt.common.data.local.ShowLocalSource
+import tv.trakt.trakt.common.helpers.LoadingState
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.LoadingState.Loading
+import tv.trakt.trakt.common.helpers.extensions.EmptyImmutableList
+import tv.trakt.trakt.common.helpers.extensions.recordError
+import tv.trakt.trakt.common.helpers.extensions.rethrowCancellation
+import tv.trakt.trakt.common.helpers.lifecycle.AppLifecycleProvider
+import tv.trakt.trakt.common.helpers.lifecycle.observeForegroundRefresh
+import tv.trakt.trakt.common.model.Movie
+import tv.trakt.trakt.common.model.Show
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.common.model.sorting.Sorting.Companion.RecentlyAdded
+import tv.trakt.trakt.core.filters.data.GlobalFilterManager
+import tv.trakt.trakt.core.lists.ListsConfig.FAVORITES_SECTION_LIMIT
+import tv.trakt.trakt.core.profile.helpers.matches
+import tv.trakt.trakt.helpers.collapsing.CollapsingManager
+import tv.trakt.trakt.helpers.collapsing.model.CollapsingKey
+
+@OptIn(FlowPreview::class)
+internal class ProfileFavoritesViewModel(
+    private val loadFavoritesUseCase: LoadUserFavoritesUseCase,
+    private val showLocalSource: ShowLocalSource,
+    private val movieLocalSource: MovieLocalSource,
+    private val dataChanges: DataChanges,
+    private val sessionManager: SessionManager,
+    private val filterManager: GlobalFilterManager,
+    private val collapsingManager: CollapsingManager,
+    private val appLifecycleProvider: AppLifecycleProvider,
+    private val collectionStateProvider: CollectionStateProvider,
+) : ViewModel() {
+    private val initialState = ProfileFavoritesState()
+
+    private val modeState = MutableStateFlow(filterManager.getFilter().mode)
+    private val userState = MutableStateFlow(initialState.user)
+    private val itemsState = MutableStateFlow(initialState.items)
+    private val navigateShow = MutableStateFlow(initialState.navigateShow)
+    private val navigateMovie = MutableStateFlow(initialState.navigateMovie)
+    private val loadingState = MutableStateFlow(initialState.loading)
+    private val collapseState = MutableStateFlow(isCollapsed())
+    private val errorState = MutableStateFlow(initialState.error)
+
+    private var loadDataJob: Job? = null
+    private var processingJob: Job? = null
+    private var collapseJob: Job? = null
+
+    init {
+        loadData()
+        observeData()
+        observeMode()
+        observeForeground()
+    }
+
+    private fun observeMode() {
+        filterManager.observeFilter()
+            .map { it.mode }
+            .filter { it != modeState.value }
+            .onEach { mode ->
+                modeState.update { mode }
+                loadData(localOnly = true)
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun observeForeground() {
+        appLifecycleProvider.observeForegroundRefresh()
+            .onEach { loadData(ignoreErrors = true) }
+            .launchIn(viewModelScope)
+    }
+
+    private fun observeData() {
+        dataChanges.observe(Kind.Favorites)
+            .debounce(200)
+            .onEach {
+                loadData(
+                    ignoreErrors = true,
+                    localOnly = true,
+                )
+            }
+            .launchIn(viewModelScope)
+
+        collectionStateProvider
+            .launchIn(viewModelScope)
+    }
+
+    fun loadData(
+        ignoreErrors: Boolean = false,
+        localOnly: Boolean = false,
+    ) {
+        loadDataJob?.cancel()
+        loadDataJob = viewModelScope.launch {
+            try {
+                if (loadEmptyIfNeeded()) {
+                    return@launch
+                }
+
+                val localItems = coroutineScope {
+                    val showsLoadedAsync = async { loadFavoritesUseCase.isShowsLoaded() }
+                    val moviesLoadedAsync = async { loadFavoritesUseCase.isMoviesLoaded() }
+
+                    if (showsLoadedAsync.await() && moviesLoadedAsync.await()) {
+                        loadFavoritesUseCase
+                            .loadLocalAll()
+                            .filter { it.matches(modeState.value) }
+                            .sortedWith(getFavoriteSorting(RecentlyAdded))
+                            .take(FAVORITES_SECTION_LIMIT)
+                    } else {
+                        EmptyImmutableList
+                    }
+                }
+
+                if (localItems.isNotEmpty()) {
+                    itemsState.update {
+                        localItems.toImmutableList()
+                    }
+                    loadingState.update { Done }
+                    if (localOnly) {
+                        return@launch
+                    }
+                } else {
+                    loadingState.update { Loading }
+                }
+
+                itemsState.update {
+                    loadFavoritesUseCase.loadAll()
+                        .filter { it.matches(modeState.value) }
+                        .take(FAVORITES_SECTION_LIMIT)
+                        .toImmutableList()
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    if (!ignoreErrors) {
+                        errorState.update { error }
+                    }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingState.update { Done }
+                loadDataJob = null
+            }
+        }
+    }
+
+    private suspend fun loadEmptyIfNeeded(): Boolean {
+        if (!sessionManager.isAuthenticated()) {
+            itemsState.update {
+                emptyList<FavoriteItem>().toImmutableList()
+            }
+            loadingState.update { Done }
+            return true
+        }
+
+        return false
+    }
+
+    fun navigateToShow(show: Show) {
+        if (navigateShow.value != null || processingJob?.isActive == true) {
+            return
+        }
+        processingJob = viewModelScope.launch {
+            showLocalSource.upsertShows(listOf(show))
+            navigateShow.update { show.ids.trakt }
+        }
+    }
+
+    fun navigateToMovie(movie: Movie) {
+        if (navigateMovie.value != null || processingJob?.isActive == true) {
+            return
+        }
+        processingJob = viewModelScope.launch {
+            movieLocalSource.upsertMovies(listOf(movie))
+            navigateMovie.update { movie.ids.trakt }
+        }
+    }
+
+    fun clearNavigation() {
+        navigateShow.update { null }
+        navigateMovie.update { null }
+    }
+
+    fun setCollapsed(collapsed: Boolean) {
+        collapseState.update { collapsed }
+
+        collapseJob?.cancel()
+        collapseJob = viewModelScope.launch {
+            when {
+                collapsed -> collapsingManager.collapse(CollapsingKey.PROFILE_FAVORITES)
+                else -> collapsingManager.expand(CollapsingKey.PROFILE_FAVORITES)
+            }
+        }
+    }
+
+    private fun isCollapsed(): Boolean {
+        return collapsingManager.isCollapsed(CollapsingKey.PROFILE_FAVORITES)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    val state = combine(
+        loadingState,
+        itemsState,
+        navigateShow,
+        navigateMovie,
+        collapseState,
+        errorState,
+        userState,
+        collectionStateProvider.stateFlow,
+    ) { states ->
+        ProfileFavoritesState(
+            loading = states[0] as LoadingState,
+            items = states[1] as ImmutableList<FavoriteItem>?,
+            navigateShow = states[2] as TraktId?,
+            navigateMovie = states[3] as TraktId?,
+            collapsed = states[4] as Boolean,
+            error = states[5] as Exception?,
+            user = states[6] as User?,
+            collection = states[7] as UserCollectionState,
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = initialState,
+    )
+}

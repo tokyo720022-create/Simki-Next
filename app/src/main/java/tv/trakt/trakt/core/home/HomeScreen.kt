@@ -1,0 +1,455 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
+package tv.trakt.trakt.core.home
+
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.util.fastRoundToInt
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.koin.androidx.compose.koinViewModel
+import tv.trakt.trakt.LocalStartAuthorization
+import tv.trakt.trakt.common.Config.WEB_DATA_IMPORT_URL
+import tv.trakt.trakt.common.Config.webMonthReviewUrl
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.model.Episode
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.WhatsNew
+import tv.trakt.trakt.core.auth.model.LoginSource
+import tv.trakt.trakt.core.calendar.model.CalendarView
+import tv.trakt.trakt.core.filters.GlobalFiltersSheet
+import tv.trakt.trakt.core.home.sections.activity.features.history.HomeHistoryView
+import tv.trakt.trakt.core.home.sections.monthreview.HomeMonthReviewView
+import tv.trakt.trakt.core.home.sections.recommended.HomeRecommendedView
+import tv.trakt.trakt.core.home.sections.streaks.HomeStreaksView
+import tv.trakt.trakt.core.home.sections.streaks.all.StreaksSheet
+import tv.trakt.trakt.core.home.sections.upcoming.HomeUpcomingView
+import tv.trakt.trakt.core.home.sections.upnext.HomeUpNextView
+import tv.trakt.trakt.core.home.sections.watchlist.HomeWatchlistView
+import tv.trakt.trakt.core.home.sections.welcome.banner.HomeWelcomeView
+import tv.trakt.trakt.core.today.pill.TodayPill
+import tv.trakt.trakt.helpers.ScreenHeaderState
+import tv.trakt.trakt.helpers.rememberHeaderState
+import tv.trakt.trakt.ui.components.ScrollableBackdropImage
+import tv.trakt.trakt.ui.components.headerbar.HeaderBar
+import tv.trakt.trakt.ui.components.whatsnew.WhatsNewSheet
+import tv.trakt.trakt.ui.theme.TraktTheme
+
+@Composable
+internal fun HomeScreen(
+    viewModel: HomeViewModel,
+    userLoading: Boolean,
+    onNavigateToShow: (TraktId) -> Unit,
+    onNavigateToDiscover: () -> Unit,
+    onNavigateToMovie: (TraktId) -> Unit,
+    onNavigateToEpisode: (showId: TraktId, episode: Episode) -> Unit,
+    onNavigateToAllUpNext: () -> Unit,
+    onNavigateToAllWatchlist: () -> Unit,
+    onNavigateToAllPersonal: () -> Unit,
+    onNavigateToAllSocial: () -> Unit,
+    onNavigateToAllRecommended: () -> Unit,
+    onNavigateToVip: () -> Unit,
+    onNavigateToCalendar: (CalendarView) -> Unit,
+    onNavigateToToday: (groupKey: String) -> Unit,
+) {
+    val startAuthorization = LocalStartAuthorization.current
+
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    var filtersSheet by remember { mutableStateOf(false) }
+    var streaksSheet by remember { mutableStateOf(false) }
+    var whatsNewSheet by remember { mutableStateOf<WhatsNew?>(null) }
+
+    LifecycleResumeEffect(Unit) {
+        viewModel.refreshMonthReview()
+        onPauseOrDispose {}
+    }
+
+    HomeScreenContent(
+        state = state,
+        userLoading = userLoading,
+        onShowClick = onNavigateToShow,
+        onShowsClick = {
+            when {
+                userLoading -> return@HomeScreenContent
+                state.user.user != null -> onNavigateToDiscover()
+                else -> startAuthorization(LoginSource.Gated)
+            }
+        },
+        onMoviesClick = {
+            when {
+                userLoading -> return@HomeScreenContent
+                state.user.user != null -> onNavigateToDiscover()
+                else -> startAuthorization(LoginSource.Gated)
+            }
+        },
+        onMovieClick = onNavigateToMovie,
+        onEpisodeClick = onNavigateToEpisode,
+        onMoreUpNextClick = onNavigateToAllUpNext,
+        onMoreWatchlistClick = onNavigateToAllWatchlist,
+        onMorePersonalClick = onNavigateToAllPersonal,
+        onMoreSocialClick = onNavigateToAllSocial,
+        onMoreRecommendedClick = onNavigateToAllRecommended,
+        onCalendarClick = { onNavigateToCalendar(state.calendarView) },
+        onVipClick = onNavigateToVip,
+        onVipSeen = viewModel::onVipUpsellSeen,
+        onTodayClick = onNavigateToToday,
+        onStreakClick = {
+            streaksSheet = true
+        },
+        onFiltersClick = {
+            filtersSheet = true
+        },
+        onWhatsNewClick = {
+            state.whatsNew?.let {
+                whatsNewSheet = it
+                viewModel.dismissWhatsNew(it.id)
+            }
+        },
+        onDismissWelcomeClick = viewModel::dismissWelcomeBanner,
+        onMonthReviewClick = viewModel::openMonthReview,
+        onDismissMonthReviewClick = viewModel::dismissMonthReview,
+    )
+
+    GlobalFiltersSheet(
+        active = filtersSheet,
+        onDismiss = {
+            filtersSheet = false
+        },
+    )
+
+    StreaksSheet(
+        visible = streaksSheet,
+        onDismiss = {
+            streaksSheet = false
+        },
+    )
+
+    WhatsNewSheet(
+        data = whatsNewSheet,
+        onDismiss = {
+            whatsNewSheet = null
+        },
+    )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun HomeScreenContent(
+    state: HomeState,
+    userLoading: Boolean,
+    modifier: Modifier = Modifier,
+    onMoreUpNextClick: () -> Unit = {},
+    onMoreWatchlistClick: () -> Unit = {},
+    onMorePersonalClick: () -> Unit = {},
+    onMoreSocialClick: () -> Unit = {},
+    onMoreRecommendedClick: () -> Unit = {},
+    onShowClick: (TraktId) -> Unit = {},
+    onShowsClick: () -> Unit = {},
+    onMoviesClick: () -> Unit = {},
+    onMovieClick: (TraktId) -> Unit = {},
+    onEpisodeClick: (showId: TraktId, episode: Episode) -> Unit = { _, _ -> },
+    onVipClick: () -> Unit = {},
+    onVipSeen: () -> Unit = {},
+    onCalendarClick: () -> Unit = {},
+    onStreakClick: () -> Unit = {},
+    onFiltersClick: () -> Unit = {},
+    onWhatsNewClick: () -> Unit = {},
+    onTodayClick: (groupKey: String) -> Unit = {},
+    onDismissWelcomeClick: () -> Unit = {},
+    onMonthReviewClick: (target: String) -> Unit = {},
+    onDismissMonthReviewClick: () -> Unit = {},
+) {
+    val uriHandler = LocalUriHandler.current
+    val headerState = rememberHeaderState()
+    val lazyListState = rememberLazyListState(
+        cacheWindow = LazyLayoutCacheWindow(
+            aheadFraction = 0.5F,
+            behindFraction = 0.5F,
+        ),
+    )
+
+    val listPadding = PaddingValues(
+        top = WindowInsets.statusBars.asPaddingValues()
+            .calculateTopPadding()
+            .plus(TraktTheme.spacing.mainPageTopSpace),
+        bottom = WindowInsets.navigationBars.asPaddingValues()
+            .calculateBottomPadding()
+            .plus(TraktTheme.size.navigationBarHeight)
+            .plus(TraktTheme.spacing.mainPageBottomSpace),
+    )
+
+    val sectionPadding = PaddingValues(
+        start = TraktTheme.spacing.mainPageHorizontalSpace,
+        end = TraktTheme.spacing.mainPageHorizontalSpace,
+    )
+
+    val isScrolledToTop by remember {
+        derivedStateOf {
+            lazyListState.firstVisibleItemIndex == 0 &&
+                lazyListState.firstVisibleItemScrollOffset == 0
+        }
+    }
+
+    LaunchedEffect(isScrolledToTop) {
+        if (isScrolledToTop) {
+            headerState.resetScrolled()
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(TraktTheme.colors.backgroundPrimary)
+            .nestedScroll(headerState.connection),
+    ) {
+        var bannerVisible by remember { mutableStateOf(false) }
+        LaunchedEffect(state.welcomeBanner) {
+            bannerVisible = state.welcomeBanner
+        }
+
+        ScrollableBackdropImage(
+            scrollState = lazyListState,
+        )
+
+        LazyColumn(
+            state = lazyListState,
+            overscrollEffect = null,
+            verticalArrangement = spacedBy(TraktTheme.spacing.mainSectionVerticalSpace),
+            contentPadding = listPadding,
+        ) {
+            if (state.welcomeBanner) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .animateContentSize(animationSpec = tween(250))
+                            .padding(sectionPadding),
+                    ) {
+                        if (bannerVisible) {
+                            HomeWelcomeView(
+                                isVip = state.user.user?.isVip == true,
+                                onDiscoverClick = onShowsClick,
+                                onImportClick = { uriHandler.openUri(WEB_DATA_IMPORT_URL) },
+                                onDismissClick = onDismissWelcomeClick,
+                                onVipClick = onVipClick,
+                            )
+                        }
+                    }
+                }
+            }
+
+            val monthReview = state.monthReview
+            val userSlug = state.user.user?.ids?.slug?.value
+            if (monthReview != null && userSlug != null) {
+                item(key = "month_review") {
+                    HomeMonthReviewView(
+                        month = monthReview,
+                        onClick = {
+                            uriHandler.openUri(
+                                webMonthReviewUrl(
+                                    user = userSlug,
+                                    month = monthReview.monthValue,
+                                    year = monthReview.year,
+                                ),
+                            )
+                            onMonthReviewClick("/users/me/mir/${monthReview.year}/${monthReview.monthValue}")
+                        },
+                        onDismissClick = onDismissMonthReviewClick,
+                        modifier = Modifier
+                            .padding(sectionPadding)
+                            .animateItem(),
+                    )
+                }
+            }
+
+            item {
+                HomeUpNextView(
+                    headerPadding = sectionPadding,
+                    contentPadding = sectionPadding,
+                    onShowClick = onShowClick,
+                    onMovieClick = onMovieClick,
+                    onShowsClick = onShowsClick,
+                    onMoviesClick = onMoviesClick,
+                    onEpisodeClick = onEpisodeClick,
+                    onMoreClick = onMoreUpNextClick,
+                )
+            }
+
+            item {
+                HomeWatchlistView(
+                    headerPadding = sectionPadding,
+                    contentPadding = sectionPadding,
+                    onShowClick = onShowClick,
+                    onShowsClick = onShowsClick,
+                    onMovieClick = onMovieClick,
+                    onMoviesClick = onMoviesClick,
+                    onMoreClick = onMoreWatchlistClick,
+                )
+            }
+
+            if (state.user.user != null) {
+                item {
+                    HomeStreaksView(
+                        onClick = onStreakClick,
+                        modifier = Modifier.padding(sectionPadding),
+                    )
+                }
+            }
+
+            item {
+                HomeUpcomingView(
+                    headerPadding = sectionPadding,
+                    contentPadding = sectionPadding,
+                    onShowClick = onShowClick,
+                    onShowsClick = onShowsClick,
+                    onMoviesClick = onMoviesClick,
+                    onEpisodeClick = onEpisodeClick,
+                    onMovieClick = onMovieClick,
+                    onCalendarClick = onCalendarClick,
+                )
+            }
+
+            if (state.user.user != null) {
+                item {
+                    HomeRecommendedView(
+                        viewModel = koinViewModel(),
+                        collection = state.collection,
+                        headerPadding = sectionPadding,
+                        contentPadding = sectionPadding,
+                        onShowClick = onShowClick,
+                        onMovieClick = onMovieClick,
+                        onMoreClick = onMoreRecommendedClick,
+                        onEmptyClick = onShowsClick,
+                    )
+                }
+            }
+
+            if (state.user.user != null) {
+                item {
+                    HomeHistoryView(
+                        headerPadding = sectionPadding,
+                        contentPadding = sectionPadding,
+                        onShowClick = onShowClick,
+                        onEpisodeClick = onEpisodeClick,
+                        onMovieClick = onMovieClick,
+                        onMoreClick = onMorePersonalClick,
+                    )
+                }
+            }
+
+//            item {
+//                HomeSocialView(
+//                    headerPadding = sectionPadding,
+//                    contentPadding = sectionPadding,
+//                    onMoreClick = onMoreSocialClick,
+//                    onShowClick = onShowClick,
+//                    onEpisodeClick = onEpisodeClick,
+//                    onMovieClick = onMovieClick,
+//                    onUserClick = onUserClick,
+//                )
+//            }
+        }
+
+        HomeScreenHeader(
+            state = state,
+            headerState = headerState,
+            userLoading = userLoading,
+            isScrolledToTop = isScrolledToTop,
+            onVipClick = onVipClick,
+            onVipSeen = onVipSeen,
+            onFiltersClick = onFiltersClick,
+            onWhatsNewClick = onWhatsNewClick,
+            onTodayClick = onTodayClick,
+            onTodayLongClick = onMoreSocialClick,
+        )
+    }
+}
+
+@Composable
+private fun HomeScreenHeader(
+    state: HomeState,
+    headerState: ScreenHeaderState,
+    userLoading: Boolean,
+    isScrolledToTop: Boolean,
+    onVipClick: () -> Unit,
+    onVipSeen: () -> Unit,
+    onFiltersClick: () -> Unit,
+    onWhatsNewClick: () -> Unit,
+    onTodayClick: (groupKey: String) -> Unit,
+    onTodayLongClick: () -> Unit,
+) {
+    val (userLoaded, userLoggedIn) = remember(state.user) {
+        val userLoaded = state.user.loading == Done
+        val userLoggedIn = state.user.user != null
+        userLoaded to userLoggedIn
+    }
+
+    HeaderBar(
+        containerAlpha = if (headerState.scrolled && !isScrolledToTop) 0.98F else 0F,
+        showLogin = userLoaded && !userLoggedIn,
+        showVip = userLoggedIn && state.user.user?.isVip == false,
+        showFilters = userLoggedIn,
+        showWhatsNew = state.whatsNew != null,
+        userLoading = userLoading,
+        todayContent = {
+            if (userLoggedIn) {
+                TodayPill(
+                    onClick = onTodayClick,
+                    onLongClick = onTodayLongClick,
+                )
+            }
+        },
+        onVipSeen = onVipSeen,
+        onVipClick = onVipClick,
+        onFilterClick = onFiltersClick,
+        onWhatsNewClick = onWhatsNewClick,
+        modifier = Modifier.offset {
+            IntOffset(0, headerState.connection.barOffset.fastRoundToInt())
+        },
+    )
+}
+
+@Preview(
+    device = "id:pixel_9",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+)
+@Composable
+private fun Preview() {
+    TraktTheme {
+        HomeScreenContent(
+            state = HomeState(),
+            userLoading = false,
+        )
+    }
+}

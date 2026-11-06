@@ -1,0 +1,63 @@
+package tv.trakt.trakt.core.reactions.di
+
+import org.koin.android.ext.koin.androidApplication
+import org.koin.androidx.workmanager.dsl.worker
+import org.koin.core.module.dsl.factoryOf
+import org.koin.core.module.dsl.viewModel
+import org.koin.dsl.module
+import tv.trakt.trakt.common.model.reactions.MediaReactionsTarget
+import tv.trakt.trakt.core.reactions.data.work.DeleteReactionWorker
+import tv.trakt.trakt.core.reactions.data.work.PostReactionWorker
+import tv.trakt.trakt.core.reactions.media.MediaReactionsViewModel
+import tv.trakt.trakt.core.reactions.media.usecases.DeleteMediaReactionUseCase
+import tv.trakt.trakt.core.reactions.media.usecases.GetMediaReactionsSummaryUseCase
+import tv.trakt.trakt.core.reactions.media.usecases.LoadUserMediaReactionsUseCase
+import tv.trakt.trakt.core.reactions.media.usecases.PostMediaReactionUseCase
+import tv.trakt.trakt.core.reactions.usecases.DeleteCommentReactionUseCase
+import tv.trakt.trakt.core.reactions.usecases.PostCommentReactionUseCase
+
+internal val reactionsModule = module {
+    factoryOf(::PostCommentReactionUseCase)
+    factoryOf(::DeleteCommentReactionUseCase)
+
+    factoryOf(::GetMediaReactionsSummaryUseCase)
+    factoryOf(::LoadUserMediaReactionsUseCase)
+    factoryOf(::PostMediaReactionUseCase)
+    factoryOf(::DeleteMediaReactionUseCase)
+
+    viewModel { (target: MediaReactionsTarget) ->
+        MediaReactionsViewModel(
+            target = target,
+            sessionManager = get(),
+            getSummaryUseCase = get(),
+            loadUserReactionsUseCase = get(),
+            postReactionUseCase = get(),
+            deleteReactionUseCase = get(),
+            analytics = get(),
+        )
+    }
+
+    worker {
+        PostReactionWorker(
+            appContext = androidApplication(),
+            workerParams = get(),
+            postReactionUseCase = get(),
+            loadUserReactionsUseCase = get(),
+            dataChanges = get(),
+            sessionManager = get(),
+            analytics = get(),
+        )
+    }
+
+    worker {
+        DeleteReactionWorker(
+            appContext = androidApplication(),
+            workerParams = get(),
+            deleteReactionsUseCase = get(),
+            loadUserReactionsUseCase = get(),
+            dataChanges = get(),
+            sessionManager = get(),
+            analytics = get(),
+        )
+    }
+}

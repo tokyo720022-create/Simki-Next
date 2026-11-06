@@ -1,0 +1,322 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
+package tv.trakt.trakt.core.summary.episodes.features.season
+
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Arrangement.spacedBy
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType.Companion.Confirm
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import tv.trakt.trakt.LocalSnackbarState
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.LoadingState.Idle
+import tv.trakt.trakt.common.helpers.LoadingState.Loading
+import tv.trakt.trakt.common.helpers.extensions.onClick
+import tv.trakt.trakt.common.model.Episode
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.core.lists.features.manage.ManageListsSheet
+import tv.trakt.trakt.core.lists.features.manage.ManageListsTarget
+import tv.trakt.trakt.core.summary.episodes.features.season.ui.EpisodeSeasonList
+import tv.trakt.trakt.core.summary.shows.features.context.episodes.EpisodeContextSheet
+import tv.trakt.trakt.core.summary.shows.features.seasons.model.EpisodeItem
+import tv.trakt.trakt.core.summary.shows.features.seasons.watcheduntil.WatchedUntilSheet
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.TraktSectionHeader
+import tv.trakt.trakt.ui.components.confirmation.ConfirmationSheet
+import tv.trakt.trakt.ui.components.confirmation.RemoveConfirmationSheet
+import tv.trakt.trakt.ui.components.dateselection.DateSelectionSheet
+import tv.trakt.trakt.ui.components.mediacards.skeletons.EpisodeSkeletonCard
+import tv.trakt.trakt.ui.snackbar.ShortSnackDuration
+import tv.trakt.trakt.ui.theme.TraktTheme
+
+@Composable
+internal fun EpisodeSeasonView(
+    viewModel: EpisodeSeasonViewModel,
+    user: User?,
+    headerPadding: PaddingValues,
+    contentPadding: PaddingValues,
+    onEpisodeClick: (episode: Episode) -> Unit,
+    onAllSeasonsClick: (Int?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    val snack = LocalSnackbarState.current
+
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    val scope = rememberCoroutineScope()
+    var confirmRemoveSheet by remember { mutableStateOf<EpisodeItem?>(null) }
+    var dateSheet by remember { mutableStateOf<EpisodeItem?>(null) }
+    var contextSheet by remember { mutableStateOf<EpisodeItem?>(null) }
+    var listsSheet by remember { mutableStateOf<ManageListsTarget?>(null) }
+    var watchedUntilSheet by remember { mutableStateOf<Episode?>(null) }
+    var confirmWatchedUntilSheet by remember { mutableStateOf<Episode?>(null) }
+
+    EpisodeSeasonContent(
+        state = state,
+        modifier = modifier,
+        headerPadding = headerPadding,
+        contentPadding = contentPadding,
+        onCollapse = viewModel::setCollapsed,
+        onAllSeasonsClick = onAllSeasonsClick,
+        onEpisodeClick = { onEpisodeClick(it.episode) },
+        onCheckClick = {
+            viewModel.addToWatched(it.episode)
+        },
+        onCheckLongClick = {
+            dateSheet = it
+        },
+        onMoreClick = {
+            contextSheet = it
+        },
+    )
+
+    EpisodeContextSheet(
+        episodeItem = contextSheet,
+        onTrackClick = {
+            dateSheet = it
+        },
+        onWatchedUntilClick = {
+            watchedUntilSheet = it.episode
+        },
+        onRemoveClick = {
+            confirmRemoveSheet = it
+        },
+        onListsClick = when {
+            user == null -> null
+            else -> { item ->
+                state.show?.let { show ->
+                    listsSheet = ManageListsTarget.EpisodeTarget(show, item.episode)
+                }
+            }
+        },
+        onDismiss = {
+            contextSheet = null
+        },
+    )
+
+    ManageListsSheet(
+        target = listsSheet,
+        onDismiss = {
+            listsSheet = null
+        },
+    )
+
+    WatchedUntilSheet(
+        show = state.show,
+        episode = watchedUntilSheet,
+        onDismiss = {
+            watchedUntilSheet = null
+        },
+    )
+
+    ConfirmationSheet(
+        active = confirmWatchedUntilSheet != null,
+        title = stringResource(R.string.button_text_watched_until_here),
+        message = stringResource(
+            R.string.button_label_watched_until_here,
+            confirmWatchedUntilSheet?.title.orEmpty(),
+        ),
+        yesText = stringResource(R.string.button_text_watched_until_here),
+        onYes = {
+            watchedUntilSheet = confirmWatchedUntilSheet
+            confirmWatchedUntilSheet = null
+        },
+        onNo = { confirmWatchedUntilSheet = null },
+    )
+
+    RemoveConfirmationSheet(
+        active = confirmRemoveSheet != null,
+        onYes = {
+            confirmRemoveSheet?.let {
+                viewModel.removeFromWatched(it.episode)
+                confirmRemoveSheet = null
+            }
+        },
+        onNo = { confirmRemoveSheet = null },
+        title = stringResource(R.string.button_text_remove_from_history),
+        message = stringResource(
+            R.string.warning_prompt_remove_from_watched,
+            "${confirmRemoveSheet?.episode?.title}",
+        ),
+    )
+
+    DateSelectionSheet(
+        active = dateSheet != null,
+        title = state.show?.title ?: "",
+        subtitle = dateSheet?.episode?.title ?: "",
+        onResult = { result ->
+            dateSheet?.let {
+                viewModel.addToWatched(
+                    episodeToAdd = it.episode,
+                    customDate = result,
+                )
+            }
+        },
+        onDismiss = {
+            dateSheet = null
+        },
+    )
+
+    LaunchedEffect(state.watchedUntilPrompt) {
+        state.watchedUntilPrompt?.let {
+            confirmWatchedUntilSheet = it
+            viewModel.clearWatchedUntilPrompt()
+        }
+    }
+
+    LaunchedEffect(state.info) {
+        if (state.info == null) {
+            return@LaunchedEffect
+        }
+
+        haptic.performHapticFeedback(Confirm)
+        with(scope) {
+            val job = launch {
+                state.info?.get(context)?.let {
+                    snack.showSnackbar(it)
+                }
+            }
+            delay(ShortSnackDuration)
+            job.cancel()
+        }
+
+        viewModel.clearInfo()
+    }
+}
+
+@Composable
+private fun EpisodeSeasonContent(
+    state: EpisodeSeasonState,
+    modifier: Modifier = Modifier,
+    headerPadding: PaddingValues = PaddingValues(),
+    contentPadding: PaddingValues = PaddingValues(),
+    onCollapse: (collapsed: Boolean) -> Unit = {},
+    onEpisodeClick: ((EpisodeItem) -> Unit)? = null,
+    onCheckClick: ((EpisodeItem) -> Unit)? = null,
+    onCheckLongClick: ((EpisodeItem) -> Unit)? = null,
+    onMoreClick: ((EpisodeItem) -> Unit)? = null,
+    onAllSeasonsClick: ((Int?) -> Unit)? = null,
+) {
+    var animateCollapse by rememberSaveable { mutableStateOf(false) }
+
+    Column(
+        verticalArrangement = spacedBy(TraktTheme.spacing.mainRowHeaderSpace),
+        modifier = modifier
+            .animateContentSize(animationSpec = if (animateCollapse) spring() else snap()),
+    ) {
+        val headerText = state.episode?.let {
+            when {
+                it.season == 0 -> stringResource(R.string.text_season_specials)
+                else -> stringResource(R.string.text_season_number, it.season)
+            }
+        }
+
+        TraktSectionHeader(
+            title = headerText ?: stringResource(R.string.list_title_seasons),
+            chevron = state.collapsed != true && state.episodes.isNotEmpty() && !state.loading.isLoading,
+            collapsed = state.collapsed ?: false,
+            onCollapseClick = {
+                animateCollapse = true
+                val current = (state.collapsed ?: false)
+                onCollapse(!current)
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(headerPadding)
+                .onClick {
+                    onAllSeasonsClick?.invoke(state.episode?.season)
+                },
+        )
+
+        if (state.collapsed != true) {
+            Crossfade(
+                targetState = state.loading,
+                animationSpec = tween(300),
+            ) { loading ->
+                when (loading) {
+                    Idle, Loading -> {
+                        ContentLoading(
+                            visible = loading.isLoading,
+                            contentPadding = contentPadding,
+                        )
+                    }
+
+                    Done -> {
+                        if (state.episodes.isEmpty()) {
+                            ContentEmpty(
+                                contentPadding = contentPadding,
+                            )
+                        } else {
+                            EpisodeSeasonList(
+                                show = state.show,
+                                episodes = state.episodes,
+                                currentEpisode = state.episode?.number,
+                                contentPadding = contentPadding,
+                                onEpisodeClick = onEpisodeClick ?: {},
+                                onCheckClick = onCheckClick ?: {},
+                                onCheckLongClick = onCheckLongClick ?: {},
+                                onMoreClick = onMoreClick ?: {},
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContentLoading(
+    visible: Boolean = true,
+    contentPadding: PaddingValues,
+) {
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (visible) 1F else 0F),
+        horizontalArrangement = spacedBy(TraktTheme.spacing.mainRowSpace),
+        contentPadding = contentPadding,
+    ) {
+        items(count = 3) {
+            EpisodeSkeletonCard()
+        }
+    }
+}
+
+@Composable
+private fun ContentEmpty(contentPadding: PaddingValues) {
+    Text(
+        text = stringResource(R.string.list_placeholder_empty),
+        color = TraktTheme.colors.textSecondary,
+        style = TraktTheme.typography.heading6,
+        modifier = Modifier.padding(contentPadding),
+    )
+}

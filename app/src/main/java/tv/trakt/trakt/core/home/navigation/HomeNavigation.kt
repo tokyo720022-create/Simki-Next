@@ -1,0 +1,58 @@
+package tv.trakt.trakt.core.home.navigation
+
+import androidx.navigation.NavController
+import androidx.navigation.NavGraphBuilder
+import androidx.navigation.compose.composable
+import kotlinx.serialization.Serializable
+import org.koin.androidx.compose.koinViewModel
+import tv.trakt.trakt.common.helpers.extensions.popUpToTop
+import tv.trakt.trakt.common.model.Episode
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.core.calendar.model.CalendarView
+import tv.trakt.trakt.core.home.HomeScreen
+
+@Serializable
+internal data object HomeDestination
+
+internal fun NavGraphBuilder.homeScreen(
+    userLoading: Boolean,
+    onNavigateToShow: (TraktId) -> Unit,
+    onNavigateToDiscover: () -> Unit,
+    onNavigateToMovie: (TraktId) -> Unit,
+    onNavigateToEpisode: (showId: TraktId, episode: Episode) -> Unit,
+    onNavigateToAllUpNext: () -> Unit,
+    onNavigateToAllWatchlist: () -> Unit,
+    onNavigateToAllPersonal: () -> Unit,
+    onNavigateToAllSocial: () -> Unit,
+    onNavigateToAllRecommended: () -> Unit,
+    onNavigateToVip: () -> Unit,
+    onNavigateToCalendar: (CalendarView) -> Unit,
+    onNavigateToUser: (User) -> Unit,
+    onNavigateToToday: (groupKey: String) -> Unit,
+) {
+    composable<HomeDestination> {
+        HomeScreen(
+            viewModel = koinViewModel(),
+            userLoading = userLoading,
+            onNavigateToShow = onNavigateToShow,
+            onNavigateToDiscover = onNavigateToDiscover,
+            onNavigateToMovie = onNavigateToMovie,
+            onNavigateToEpisode = onNavigateToEpisode,
+            onNavigateToAllUpNext = onNavigateToAllUpNext,
+            onNavigateToAllWatchlist = onNavigateToAllWatchlist,
+            onNavigateToAllPersonal = onNavigateToAllPersonal,
+            onNavigateToAllSocial = onNavigateToAllSocial,
+            onNavigateToAllRecommended = onNavigateToAllRecommended,
+            onNavigateToVip = onNavigateToVip,
+            onNavigateToCalendar = onNavigateToCalendar,
+            onNavigateToToday = onNavigateToToday,
+        )
+    }
+}
+
+internal fun NavController.navigateToHome() {
+    navigate(route = HomeDestination) {
+        popUpToTop(this@navigateToHome)
+    }
+}

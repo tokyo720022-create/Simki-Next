@@ -1,0 +1,41 @@
+package tv.trakt.trakt.core.comments
+
+import androidx.compose.runtime.Immutable
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableMap
+import kotlinx.collections.immutable.ImmutableSet
+import tv.trakt.trakt.common.helpers.LoadingState
+import tv.trakt.trakt.common.model.Comment
+import tv.trakt.trakt.common.model.MediaType
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.common.model.reactions.Reaction
+import tv.trakt.trakt.common.model.reactions.ReactionsSummary
+import tv.trakt.trakt.core.comments.features.translation.model.CommentTranslations
+import tv.trakt.trakt.core.comments.model.CommentsFilter
+import tv.trakt.trakt.core.comments.model.MentionSource
+
+@Immutable
+internal data class CommentsState(
+    val backgroundUrl: String? = null,
+    val media: MediaState? = null,
+    val comments: ImmutableList<Comment>? = null,
+    val replies: ImmutableMap<Int, ImmutableList<Comment>>? = null,
+    val filter: CommentsFilter = CommentsFilter.Popular,
+    val language: String? = null,
+    val reactions: ImmutableMap<Int, ReactionsSummary>? = null,
+    val userReactions: ImmutableMap<Int, Reaction?>? = null,
+    val translations: CommentTranslations = CommentTranslations(),
+    val user: User? = null,
+    val loading: LoadingState = LoadingState.Idle,
+    val loadingReplies: ImmutableSet<Int>? = null,
+    val error: Exception? = null,
+) {
+    data class MediaState(
+        val id: TraktId,
+        val type: MediaType,
+        val title: String?,
+        val episodes: Int? = null,
+        val mentionSource: MentionSource? = null,
+    )
+}

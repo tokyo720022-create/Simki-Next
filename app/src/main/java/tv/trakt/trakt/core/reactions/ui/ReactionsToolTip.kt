@@ -1,0 +1,214 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
+package tv.trakt.trakt.core.reactions.ui
+
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults.rememberTooltipPositionProvider
+import androidx.compose.material3.TooltipState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.shadow.Shadow
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType.Companion.Confirm
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import kotlinx.collections.immutable.toImmutableMap
+import tv.trakt.trakt.common.helpers.extensions.onClick
+import tv.trakt.trakt.common.model.reactions.Reaction
+import tv.trakt.trakt.common.model.reactions.ReactionsSummary
+import tv.trakt.trakt.helpers.extensions.TraktThemeLightDark
+import tv.trakt.trakt.ui.theme.TraktTheme
+
+@Composable
+fun ReactionsToolTip(
+    state: TooltipState,
+    reactions: ReactionsSummary?,
+    modifier: Modifier = Modifier,
+    userEnabled: Boolean = true,
+    userReaction: Reaction? = null,
+    onReactionClick: ((Reaction) -> Unit)? = null,
+    contentAnchor: @Composable () -> Unit,
+) {
+    val haptic = LocalHapticFeedback.current
+
+    TooltipBox(
+        state = state,
+        content = contentAnchor,
+        positionProvider = rememberTooltipPositionProvider(
+            positioning = TooltipAnchorPosition.Above,
+        ),
+        tooltip = {
+            ReactionsToolTipContent(
+                reactions = reactions,
+                userReaction = userReaction,
+                userEnabled = userEnabled,
+                onReactionClick = {
+                    onReactionClick?.invoke(it)
+                    haptic.performHapticFeedback(Confirm)
+                },
+                onDismiss = {
+                    state.dismiss()
+                },
+            )
+        },
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun ReactionsToolTipContent(
+    modifier: Modifier = Modifier,
+    reactions: ReactionsSummary?,
+    userReaction: Reaction?,
+    userEnabled: Boolean,
+    onReactionClick: (Reaction) -> Unit = {},
+    onDismiss: () -> Unit = {},
+) {
+    val summaryVisible = (reactions?.reactionsCount ?: 0) > 0
+
+    val animatedAlpha: Float by animateFloatAsState(
+        targetValue = if (summaryVisible) 1f else 0f,
+        animationSpec = tween(200),
+        label = "alpha",
+    )
+
+    val animatedTranslation by animateIntAsState(
+        targetValue = if (summaryVisible) 0 else 6,
+        animationSpec = tween(200),
+        label = "translation",
+    )
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = spacedBy(0.dp),
+        modifier = modifier
+            .widthIn(max = 300.dp)
+            .dropShadow(
+                shape = RoundedCornerShape(20.dp),
+                shadow = Shadow(
+                    radius = 3.dp,
+                    color = if (summaryVisible) Color.Black else Color.Transparent,
+                    spread = 1.dp,
+                    alpha = 0.06f,
+                ),
+            )
+            .background(
+                color = TraktTheme.colors.reactionsContainer.copy(alpha = animatedAlpha),
+                shape = RoundedCornerShape(20.dp),
+            ),
+    ) {
+        ReactionsSummaryGrid(
+            reactions = reactions,
+            userReaction = userReaction,
+            modifier = Modifier
+                .alpha(animatedAlpha)
+                .fillMaxWidth()
+                .padding(
+                    top = 6.dp,
+                    bottom = 4.dp,
+                    start = 6.dp,
+                    end = 6.dp,
+                )
+                .shadow(
+                    elevation = TraktTheme.colors.shadowDynamicDefault,
+                    shape = RoundedCornerShape(
+                        topStart = 16.dp,
+                        topEnd = 16.dp,
+                        bottomStart = 20.dp,
+                        bottomEnd = 20.dp,
+                    ),
+                )
+                .graphicsLayer {
+                    if (summaryVisible) {
+                        translationY = animatedTranslation.dp.toPx()
+                    }
+                }
+                .onClick(onClick = onDismiss),
+        )
+
+        if (userEnabled) {
+            ReactionsStrip(
+                selectedReaction = userReaction,
+                onReactionClick = onReactionClick,
+                onCloseClick = onDismiss,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .dropShadow(
+                        shape = RoundedCornerShape(20.dp),
+                        shadow = Shadow(
+                            radius = 3.dp,
+                            color = if (summaryVisible) Color.Transparent else Color.Black,
+                            spread = 1.dp,
+                            alpha = 0.06f,
+                        ),
+                    )
+                    .background(TraktTheme.colors.reactionsContainer, RoundedCornerShape(20.dp))
+                    .padding(
+                        start = 8.dp,
+                        end = 8.dp,
+                        top = 6.dp,
+                        bottom = 6.dp,
+                    ),
+            )
+        } else {
+            Spacer(modifier = Modifier.height(2.dp))
+        }
+    }
+}
+
+@Preview()
+@Composable
+private fun Preview() {
+    TraktThemeLightDark {
+        ReactionsToolTipContent(
+            userReaction = null,
+            userEnabled = true,
+            reactions = ReactionsSummary(
+                reactionsCount = 14,
+                distribution = mapOf(
+                    Reaction.LOVE to 2,
+                    Reaction.LAUGH to 1,
+                ).toImmutableMap(),
+            ),
+        )
+    }
+}
+
+@Preview()
+@Composable
+private fun Preview2() {
+    TraktThemeLightDark {
+        ReactionsToolTipContent(
+            userReaction = Reaction.SPOILER,
+            userEnabled = false,
+            reactions = ReactionsSummary(
+                reactionsCount = 14,
+                distribution = mapOf(
+                    Reaction.LOVE to 2,
+                    Reaction.LAUGH to 1,
+                ).toImmutableMap(),
+            ),
+        )
+    }
+}

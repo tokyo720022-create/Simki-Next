@@ -1,0 +1,266 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
+package tv.trakt.trakt.core.summary.shows.features.seasons.all
+
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.stringResource
+import tv.trakt.trakt.common.helpers.extensions.toGifQuery
+import tv.trakt.trakt.common.model.Comment
+import tv.trakt.trakt.common.model.Episode
+import tv.trakt.trakt.common.model.MediaType
+import tv.trakt.trakt.common.model.Season
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.common.model.toTraktId
+import tv.trakt.trakt.core.comments.features.deletecomment.DeleteCommentSheet
+import tv.trakt.trakt.core.comments.features.editcomment.EditCommentSheet
+import tv.trakt.trakt.core.comments.features.postcomment.PostCommentSheet
+import tv.trakt.trakt.core.comments.features.postreply.PostReplySheet
+import tv.trakt.trakt.core.comments.model.MentionSource
+import tv.trakt.trakt.core.lists.features.manage.ManageListsSheet
+import tv.trakt.trakt.core.lists.features.manage.ManageListsTarget
+import tv.trakt.trakt.core.summary.shows.features.context.episodes.EpisodeContextSheet
+import tv.trakt.trakt.core.summary.shows.features.context.seasons.SeasonContextSheet
+import tv.trakt.trakt.core.summary.shows.features.seasons.model.EpisodeItem
+import tv.trakt.trakt.core.summary.shows.features.seasons.watcheduntil.WatchedUntilSheet
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.confirmation.ConfirmationSheet
+import tv.trakt.trakt.ui.components.confirmation.RemoveConfirmationSheet
+import tv.trakt.trakt.ui.components.dateselection.DateSelectionSheet
+
+/**
+ * Holds the transient visibility state for every bottom sheet shown on the
+ * all-seasons screen. Owned by [AllShowSeasonsScreen] and mutated both by the
+ * content callbacks and by the sheets themselves.
+ */
+@Stable
+internal class AllShowSeasonsSheetState {
+    var confirmRemoveEpisode by mutableStateOf<EpisodeItem?>(null)
+    var confirmMarkSeason by mutableStateOf(false)
+    var confirmRemoveSeason by mutableStateOf(false)
+    var episodeDate by mutableStateOf<EpisodeItem?>(null)
+    var episodeWatchedUntil by mutableStateOf<Episode?>(null)
+    var confirmWatchedUntil by mutableStateOf<Episode?>(null)
+    var episodeContext by mutableStateOf<EpisodeItem?>(null)
+    var seasonContext by mutableStateOf<Season?>(null)
+    var manageLists by mutableStateOf<ManageListsTarget?>(null)
+    var seasonDate by mutableStateOf(false)
+    var postComment by mutableStateOf(false)
+    var postReply by mutableStateOf<Pair<Comment, User?>?>(null)
+    var editComment by mutableStateOf<Comment?>(null)
+    var deleteComment by mutableStateOf<Comment?>(null)
+    var deleteReply by mutableStateOf<Comment?>(null)
+}
+
+@Composable
+internal fun rememberAllShowSeasonsSheetState(): AllShowSeasonsSheetState = remember { AllShowSeasonsSheetState() }
+
+@Composable
+internal fun AllShowSeasonsSheets(
+    state: AllShowSeasonsState,
+    sheetState: AllShowSeasonsSheetState,
+    viewModel: AllShowSeasonsViewModel,
+) {
+    EpisodeContextSheet(
+        episodeItem = sheetState.episodeContext,
+        onTrackClick = {
+            sheetState.episodeDate = it
+        },
+        onWatchedUntilClick = {
+            sheetState.episodeWatchedUntil = it.episode
+        },
+        onRemoveClick = {
+            sheetState.confirmRemoveEpisode = it
+        },
+        onListsClick = when {
+            state.user == null -> null
+            else -> { item ->
+                state.show?.let { show ->
+                    sheetState.manageLists = ManageListsTarget.EpisodeTarget(show, item.episode)
+                }
+            }
+        },
+        onDismiss = {
+            sheetState.episodeContext = null
+        },
+    )
+
+    SeasonContextSheet(
+        show = state.show,
+        season = sheetState.seasonContext,
+        watched = state.items.isSelectedSeasonWatched,
+        onTrackClick = {
+            sheetState.confirmMarkSeason = true
+        },
+        onRemoveClick = {
+            sheetState.confirmRemoveSeason = true
+        },
+        onListsClick = {
+            val show = state.show
+            val season = sheetState.seasonContext
+            if (show != null && season != null) {
+                sheetState.manageLists = ManageListsTarget.SeasonTarget(show, season)
+            }
+        }.takeIf { state.user != null },
+        onDismiss = {
+            sheetState.seasonContext = null
+        },
+    )
+
+    ManageListsSheet(
+        target = sheetState.manageLists,
+        onDismiss = {
+            sheetState.manageLists = null
+        },
+    )
+
+    WatchedUntilSheet(
+        show = state.show,
+        episode = sheetState.episodeWatchedUntil,
+        onDismiss = {
+            sheetState.episodeWatchedUntil = null
+        },
+    )
+
+    ConfirmationSheet(
+        active = sheetState.confirmWatchedUntil != null,
+        title = stringResource(R.string.button_text_watched_until_here),
+        message = stringResource(
+            R.string.button_label_watched_until_here,
+            sheetState.confirmWatchedUntil?.title.orEmpty(),
+        ),
+        yesText = stringResource(R.string.button_text_watched_until_here),
+        onYes = {
+            sheetState.episodeWatchedUntil = sheetState.confirmWatchedUntil
+            sheetState.confirmWatchedUntil = null
+        },
+        onNo = { sheetState.confirmWatchedUntil = null },
+    )
+
+    RemoveConfirmationSheet(
+        active = sheetState.confirmRemoveEpisode != null,
+        onYes = {
+            sheetState.confirmRemoveEpisode?.let {
+                viewModel.removeFromWatched(it.episode)
+                sheetState.confirmRemoveEpisode = null
+            }
+        },
+        onNo = { sheetState.confirmRemoveEpisode = null },
+        title = stringResource(R.string.button_text_remove_from_history),
+        message = stringResource(
+            R.string.warning_prompt_remove_from_watched,
+            "${sheetState.confirmRemoveEpisode?.episode?.title}",
+        ),
+    )
+
+    ConfirmationSheet(
+        active = sheetState.confirmMarkSeason,
+        onYes = {
+            sheetState.confirmMarkSeason = false
+            sheetState.seasonDate = true
+        },
+        onNo = { sheetState.confirmMarkSeason = false },
+        title = stringResource(R.string.button_text_track),
+        message = stringResource(
+            R.string.warning_prompt_mark_as_watched_multiple_episodes,
+            state.items.selectedSeasonEpisodes.count { !it.isWatched && it.episode.isReleased },
+        ),
+    )
+
+    RemoveConfirmationSheet(
+        active = sheetState.confirmRemoveSeason,
+        onYes = {
+            sheetState.confirmRemoveSeason = false
+            state.items.selectedSeason?.let { viewModel.removeFromWatched(it) }
+        },
+        onNo = { sheetState.confirmRemoveSeason = false },
+        title = stringResource(R.string.button_text_remove_from_history),
+        message = stringResource(
+            R.string.warning_prompt_remove_from_watched,
+            stringResource(
+                R.string.text_season_number,
+                state.items.selectedSeason?.number ?: 0,
+            ),
+        ),
+    )
+
+    DateSelectionSheet(
+        active = sheetState.episodeDate != null,
+        title = state.show?.title ?: "",
+        onResult = { result ->
+            sheetState.episodeDate?.let {
+                viewModel.addToWatched(
+                    episode = it.episode,
+                    customDate = result,
+                )
+            }
+        },
+        onDismiss = { sheetState.episodeDate = null },
+    )
+
+    DateSelectionSheet(
+        active = sheetState.seasonDate,
+        title = state.show?.title ?: "",
+        onResult = { result ->
+            viewModel.addToWatched(season = state.items, customDate = result)
+        },
+        onDismiss = { sheetState.seasonDate = false },
+    )
+
+    val mentionSource = state.show?.ids?.trakt?.let { MentionSource.Show(it) }
+
+    PostCommentSheet(
+        active = sheetState.postComment,
+        mediaId = state.items.selectedSeason?.ids?.trakt,
+        mediaType = MediaType.Season,
+        mediaTitle = state.show?.title,
+        mentionSource = mentionSource,
+        onCommentPost = viewModel::addSeasonComment,
+        onDismiss = { sheetState.postComment = false },
+    )
+
+    PostReplySheet(
+        active = sheetState.postReply != null,
+        comment = sheetState.postReply?.first,
+        user = sheetState.postReply?.second,
+        mentionSource = mentionSource,
+        gifQuery = MediaType.Season.toGifQuery(state.show?.title),
+        onReplyPost = viewModel::addSeasonReply,
+        onDismiss = { sheetState.postReply = null },
+    )
+
+    EditCommentSheet(
+        comment = sheetState.editComment,
+        gifQuery = MediaType.Season.toGifQuery(state.show?.title),
+        mentionSource = mentionSource,
+        onCommentEdit = viewModel::updateSeasonComment,
+        onDismiss = { sheetState.editComment = null },
+    )
+
+    DeleteCommentSheet(
+        active = sheetState.deleteComment != null,
+        commentId = sheetState.deleteComment?.id?.toTraktId(),
+        onDeleted = viewModel::deleteSeasonComment,
+        onDismiss = { sheetState.deleteComment = null },
+    )
+
+    DeleteCommentSheet(
+        isReply = true,
+        active = sheetState.deleteReply != null,
+        commentId = sheetState.deleteReply?.id?.toTraktId(),
+        onDeleted = {
+            sheetState.deleteReply?.let {
+                viewModel.deleteSeasonReply(
+                    parentId = it.parentId.toTraktId(),
+                    replyId = it.id.toTraktId(),
+                )
+            }
+        },
+        onDismiss = { sheetState.deleteReply = null },
+    )
+}

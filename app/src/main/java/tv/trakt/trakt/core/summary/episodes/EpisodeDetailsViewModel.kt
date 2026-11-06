@@ -1,0 +1,682 @@
+package tv.trakt.trakt.core.summary.episodes
+
+import android.content.Context
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.navigation.toRoute
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import timber.log.Timber
+import tv.trakt.trakt.common.auth.session.SessionManager
+import tv.trakt.trakt.common.core.sync.changes.ChangeOrigin
+import tv.trakt.trakt.common.core.sync.changes.DataChange.Kind
+import tv.trakt.trakt.common.core.sync.changes.DataChanges
+import tv.trakt.trakt.common.core.translations.model.MediaTranslation
+import tv.trakt.trakt.common.core.translations.usecase.GetEpisodeTranslationsUseCase
+import tv.trakt.trakt.common.core.user.usecases.progress.LoadUserProgressUseCase
+import tv.trakt.trakt.common.data.local.EpisodeLocalSource
+import tv.trakt.trakt.common.firebase.analytics.Analytics
+import tv.trakt.trakt.common.helpers.DynamicStringResource
+import tv.trakt.trakt.common.helpers.LoadingState
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.LoadingState.Loading
+import tv.trakt.trakt.common.helpers.StringResource
+import tv.trakt.trakt.common.helpers.extensions.recordError
+import tv.trakt.trakt.common.helpers.extensions.rethrowCancellation
+import tv.trakt.trakt.common.model.DateSelectionResult
+import tv.trakt.trakt.common.model.Episode
+import tv.trakt.trakt.common.model.ExternalRating
+import tv.trakt.trakt.common.model.MediaType.Episode
+import tv.trakt.trakt.common.model.Person
+import tv.trakt.trakt.common.model.SeasonEpisode
+import tv.trakt.trakt.common.model.Show
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.common.model.ratings.UserRating
+import tv.trakt.trakt.common.model.toTraktId
+import tv.trakt.trakt.core.checkin.data.CheckInManager
+import tv.trakt.trakt.core.ratings.data.work.PostRatingWorker
+import tv.trakt.trakt.core.summary.episodes.EpisodeDetailsState.UserRatingsState
+import tv.trakt.trakt.core.summary.episodes.features.actors.usecases.GetEpisodeDirectorUseCase
+import tv.trakt.trakt.core.summary.episodes.features.socials.GetEpisodeSocialsUseCase
+import tv.trakt.trakt.core.summary.episodes.navigation.EpisodeDetailsDestination
+import tv.trakt.trakt.core.summary.episodes.usecases.GetEpisodeDetailsUseCase
+import tv.trakt.trakt.core.summary.episodes.usecases.GetEpisodeRatingsUseCase
+import tv.trakt.trakt.core.summary.shows.usecases.GetShowDetailsUseCase
+import tv.trakt.trakt.core.summary.social.model.MediaSocialActivity
+import tv.trakt.trakt.core.sync.usecases.UpdateEpisodeHistoryUseCase
+import tv.trakt.trakt.core.user.usecases.ratings.LoadUserRatingsUseCase
+import tv.trakt.trakt.resources.R
+import java.util.Locale
+import kotlin.time.Duration.Companion.milliseconds
+
+@OptIn(FlowPreview::class)
+internal class EpisodeDetailsViewModel(
+    savedStateHandle: SavedStateHandle,
+    private val appContext: Context,
+    private val getShowDetailsUseCase: GetShowDetailsUseCase,
+    private val getEpisodeDetailsUseCase: GetEpisodeDetailsUseCase,
+    private val getEpisodeDirectorUseCase: GetEpisodeDirectorUseCase,
+    private val getEpisodeTranslationsUseCase: GetEpisodeTranslationsUseCase,
+    private val getEpisodeSocialsUseCase: GetEpisodeSocialsUseCase,
+    private val getRatingsUseCase: GetEpisodeRatingsUseCase,
+    private val loadProgressUseCase: LoadUserProgressUseCase,
+    private val loadRatingUseCase: LoadUserRatingsUseCase,
+    private val updateHistoryUseCase: UpdateEpisodeHistoryUseCase,
+    private val dataChanges: DataChanges,
+    private val episodeLocalSource: EpisodeLocalSource,
+    private val sessionManager: SessionManager,
+    private val checkInManager: CheckInManager,
+    private val analytics: Analytics,
+) : ViewModel() {
+    private val initialState = EpisodeDetailsState()
+    private val origin = ChangeOrigin.unique()
+    private val destination = savedStateHandle.toRoute<EpisodeDetailsDestination>()
+
+    private val showId = destination.showId.toTraktId()
+    private val episodeId = destination.episodeId.toTraktId()
+
+    private val seasonEpisode = SeasonEpisode(
+        season = destination.season,
+        episode = destination.episode,
+    )
+
+    private val showState = MutableStateFlow(initialState.show)
+    private val episodeState = MutableStateFlow(initialState.episode)
+    private val episodeRatingsState = MutableStateFlow(initialState.episodeRatings)
+    private val episodeUserRatingsState = MutableStateFlow(initialState.episodeUserRating)
+    private val episodeProgressState = MutableStateFlow(initialState.episodeProgress)
+    private val episodeCreatorState = MutableStateFlow(initialState.episodeCreator)
+    private val episodeTranslationState = MutableStateFlow(initialState.episodeTranslation)
+    private val episodeSocialsState = MutableStateFlow(initialState.episodeSocials)
+    private val navigateEpisode = MutableStateFlow(initialState.navigateEpisode)
+    private val loadingState = MutableStateFlow(initialState.loading)
+    private val loadingProgress = MutableStateFlow(initialState.loadingProgress)
+    private val infoState = MutableStateFlow(initialState.info)
+    private val errorState = MutableStateFlow(initialState.error)
+    private val userState = MutableStateFlow(initialState.user)
+
+    private var ratingJob: Job? = null
+
+    init {
+        loadUser()
+        loadData()
+        loadProgressData()
+        loadUserRatingData()
+        loadCreator()
+
+        observeData()
+        observeCheckIn()
+        observeRatings()
+
+        analytics.logScreenView(
+            screenName = "episode_details",
+        )
+    }
+
+    private fun observeRatings() {
+        dataChanges.observe(Kind.Ratings, exclude = origin)
+            .debounce(200.milliseconds)
+            .onEach {
+                refreshUserRating()
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun observeData() {
+        dataChanges.observe(Kind.History, exclude = origin)
+            .debounce(200.milliseconds)
+            .onEach {
+                loadProgressData(
+                    ignoreErrors = true,
+                )
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun observeCheckIn() {
+        dataChanges.observe(Kind.CheckIn, exclude = origin)
+            .debounce(200.milliseconds)
+            .onEach {
+                loadProgressData(
+                    ignoreErrors = true,
+                    force = true,
+                )
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun loadUser() {
+        viewModelScope.launch {
+            try {
+                userState.update {
+                    sessionManager.getProfile()
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    private fun loadData() {
+        viewModelScope.launch {
+            try {
+                val showAsync = async { getShowDetailsUseCase.getLocalShow(showId) }
+                val episodeAsync = async { getEpisodeDetailsUseCase.getLocalEpisode(episodeId) }
+
+                var show = showAsync.await()
+                var episode = episodeAsync.await()
+
+                if (episode == null || show == null) {
+                    loadingState.update { Loading }
+                }
+
+                if (show == null) {
+                    show = getShowDetailsUseCase.getShow(
+                        showId = showId,
+                    )
+                }
+                showState.update { show }
+
+                if (episode == null) {
+                    episode = getEpisodeDetailsUseCase.getEpisode(
+                        showId = showId,
+                        seasonEpisode = seasonEpisode,
+                    )
+                }
+                episodeState.update { episode }
+
+                loadTranslations()
+                loadRatings(episode)
+                loadSocials(episode)
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingState.update { Done }
+            }
+        }
+    }
+
+    private fun loadTranslations() {
+        viewModelScope.launch {
+            try {
+                val locale = AppCompatDelegate.getApplicationLocales().get(0) ?: Locale.getDefault()
+                episodeTranslationState.update {
+                    getEpisodeTranslationsUseCase.getEpisodeTranslations(
+                        showId = showId,
+                        seasonEpisode = seasonEpisode,
+                        locale = locale,
+                    )
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    private fun loadProgressData(
+        ignoreErrors: Boolean = false,
+        force: Boolean = false,
+    ) {
+        viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+            try {
+                loadingProgress.update { Loading }
+
+                if (force || !loadProgressUseCase.isShowsLoaded()) {
+                    loadProgressUseCase.loadShowsProgress()
+                }
+
+                val progress = loadProgressUseCase.loadLocalShows()
+                    .firstOrNull {
+                        it.showId == showId
+                    }?.seasons?.firstOrNull {
+                        it.number == seasonEpisode.season
+                    }?.episodes?.firstOrNull {
+                        it.id == episodeId
+                    }
+
+                episodeProgressState.update {
+                    EpisodeDetailsState.ProgressState(plays = progress?.plays?.size)
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    if (!ignoreErrors) {
+                        errorState.update { error }
+                    }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingProgress.update { Done }
+            }
+        }
+    }
+
+    private fun loadSocials(episode: Episode?) {
+        if (episode == null) {
+            return
+        }
+        viewModelScope.launch {
+            try {
+                episodeSocialsState.update {
+                    getEpisodeSocialsUseCase.getSocials(
+                        showId = showId,
+                        season = episode.season,
+                        episode = episode.number,
+                    )
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    private fun loadRatings(episode: Episode?) {
+        if (episode?.isReleased != true) {
+            // Don't load ratings for unreleased episodes
+            return
+        }
+        viewModelScope.launch {
+            try {
+                episodeRatingsState.update {
+                    getRatingsUseCase.getExternalRatings(
+                        showId = showId,
+                        season = episode.season,
+                        episode = episode.number,
+                    )
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    private fun loadUserRatingData() {
+        viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+            try {
+                episodeUserRatingsState.update {
+                    UserRatingsState(
+                        loading = Loading,
+                    )
+                }
+
+                if (!loadRatingUseCase.isEpisodesLoaded()) {
+                    loadRatingUseCase.loadEpisodes()
+                }
+
+                val userRatings = loadRatingUseCase.loadLocalEpisodes()
+                val userRating = userRatings[episodeId]
+
+                episodeUserRatingsState.update {
+                    UserRatingsState(
+                        rating = userRating,
+                        loading = Done,
+                    )
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    private fun refreshUserRating() {
+        viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+            try {
+                val userRating = loadRatingUseCase.loadLocalEpisodes()[episodeId]
+                episodeUserRatingsState.update { state ->
+                    state?.copy(rating = userRating)
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    private fun loadCreator() {
+        viewModelScope.launch {
+            try {
+                episodeCreatorState.update {
+                    getEpisodeDirectorUseCase.getDirector(
+                        showId = showId,
+                        seasonEpisode = seasonEpisode,
+                    )
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    fun addToCheckIn() {
+        if (isLoading()) {
+            return
+        }
+
+        viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+
+            try {
+                loadingProgress.update { Loading }
+
+                checkInManager.startEpisode(
+                    showId = showId,
+                    seasonEpisode = seasonEpisode,
+                    origin = origin,
+                    context = appContext,
+                )
+
+                val progress = loadProgressUseCase.loadShowsProgress()
+                    .firstOrNull {
+                        it.showId == showId
+                    }?.seasons?.firstOrNull {
+                        it.number == seasonEpisode.season
+                    }?.episodes?.firstOrNull {
+                        it.id == episodeId
+                    }
+
+                episodeProgressState.update { state ->
+                    state?.copy(plays = progress?.plays?.size)
+                }
+
+                analytics.progress.logAddWatchedMedia(
+                    mediaType = "episode",
+                    source = "episode_details",
+                    date = "checkin",
+                )
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingProgress.update { Done }
+            }
+        }
+    }
+
+    // History
+
+    fun addToWatched(customDate: DateSelectionResult? = null) {
+        if (isLoading()) {
+            return
+        }
+        viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+            try {
+                loadingProgress.update { Loading }
+
+                val response = updateHistoryUseCase.addToHistory(
+                    episodeId = episodeId,
+                    customDate = customDate,
+                )
+
+                val progress = loadProgressUseCase.loadShowsProgress()
+                    .firstOrNull {
+                        it.showId == showId
+                    }?.seasons?.firstOrNull {
+                        it.number == seasonEpisode.season
+                    }?.episodes?.firstOrNull {
+                        it.id == episodeId
+                    }
+
+                episodeProgressState.update { state ->
+                    state?.copy(plays = progress?.plays?.size)
+                }
+
+                dataChanges.notify(Kind.History, origin = origin)
+
+                if (response.added.episodes != 0) {
+                    infoState.update { DynamicStringResource(R.string.text_info_history_added) }
+                }
+
+                analytics.progress.logAddWatchedMedia(
+                    mediaType = "episode",
+                    source = "episode_details",
+                    date = customDate?.analyticsStrings,
+                )
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.d(error, "Failed to add movie to history")
+                }
+            } finally {
+                loadingProgress.update { Done }
+            }
+        }
+    }
+
+    fun removeFromWatched() {
+        if (isLoading()) {
+            return
+        }
+        viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+            try {
+                loadingProgress.update { Loading }
+
+                updateHistoryUseCase.removeEpisodeFromHistory(episodeId.value)
+                loadProgressUseCase.loadShowsProgress()
+                    .firstOrNull {
+                        it.showId == showId
+                    }?.seasons?.firstOrNull {
+                        it.number == seasonEpisode.season
+                    }?.episodes?.firstOrNull {
+                        it.id == episodeId
+                    }
+
+                episodeProgressState.update { state ->
+                    state?.copy(plays = 0)
+                }
+
+                dataChanges.notify(Kind.History, origin = origin)
+                infoState.update {
+                    DynamicStringResource(R.string.text_info_history_removed)
+                }
+                analytics.progress.logRemoveWatchedMedia(
+                    mediaType = "episode",
+                    source = "episode_details",
+                )
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingProgress.update { Done }
+            }
+        }
+    }
+
+    // Ratings
+
+    fun addRating(newRating: Int) {
+        ratingJob?.cancel()
+        ratingJob = viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+
+            val episodeRating = episodeUserRatingsState.value?.rating?.rating
+            if (episodeRating == newRating) {
+                Timber.d("Rating is already $newRating, skipping update")
+                return@launch
+            }
+
+            episodeUserRatingsState.update {
+                UserRatingsState(
+                    rating = UserRating(
+                        mediaId = episodeId,
+                        mediaType = Episode,
+                        rating = newRating,
+                    ),
+                    loading = Done,
+                )
+            }
+
+            PostRatingWorker.scheduleOneTime(
+                appContext = appContext,
+                mediaId = episodeId,
+                mediaType = Episode,
+                rating = newRating,
+                origin = origin,
+            )
+        }
+    }
+
+    fun removeRating() {
+        ratingJob?.cancel()
+        ratingJob = viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+
+            if (episodeUserRatingsState.value?.rating?.rating == 0) {
+                Timber.d("Rating is already 0, skipping removal")
+                return@launch
+            }
+
+            episodeUserRatingsState.update {
+                UserRatingsState(
+                    rating = UserRating(
+                        mediaId = episodeId,
+                        mediaType = Episode,
+                        rating = 0,
+                        favorite = it?.rating?.favorite == true,
+                    ),
+                    loading = Done,
+                )
+            }
+
+            PostRatingWorker.scheduleOneTime(
+                appContext = appContext,
+                mediaId = episodeId,
+                mediaType = Episode,
+                rating = 0, // A rating of 0 indicates removal of rating
+                origin = origin,
+            )
+        }
+    }
+
+    // Misc
+
+    fun navigateToEpisode(episode: Episode) {
+        if (isLoading()) {
+            return
+        }
+        if (episode.ids.trakt == episodeId) {
+            // Same episode, don't navigate
+            return
+        }
+        viewModelScope.launch {
+            episodeLocalSource.upsertEpisodes(listOf(episode))
+            navigateEpisode.update {
+                Pair(showId, episode)
+            }
+        }
+    }
+
+    fun clearInfo() {
+        infoState.update { null }
+    }
+
+    fun clearNavigation() {
+        navigateEpisode.update { null }
+    }
+
+    private fun isLoading(): Boolean {
+        return showState.value == null ||
+            loadingState.value.isLoading ||
+            loadingProgress.value.isLoading
+    }
+
+    fun logShare() {
+        analytics.logShare(source = "episode", type = null)
+    }
+
+    fun onVipUpsellSeen() {
+        analytics.vip.logUpsellImpression("episode-details")
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    val state = combine(
+        showState,
+        episodeState,
+        episodeRatingsState,
+        episodeUserRatingsState,
+        episodeProgressState,
+        episodeCreatorState,
+        episodeTranslationState,
+        episodeSocialsState,
+        loadingState,
+        loadingProgress,
+        infoState,
+        errorState,
+        userState,
+        navigateEpisode,
+    ) { state ->
+        EpisodeDetailsState(
+            show = state[0] as Show?,
+            episode = state[1] as Episode?,
+            episodeRatings = state[2] as ExternalRating?,
+            episodeUserRating = state[3] as UserRatingsState?,
+            episodeProgress = state[4] as EpisodeDetailsState.ProgressState?,
+            episodeCreator = state[5] as Person?,
+            episodeTranslation = state[6] as MediaTranslation?,
+            episodeSocials = state[7] as ImmutableList<MediaSocialActivity>?,
+            loading = state[8] as LoadingState,
+            loadingProgress = state[9] as LoadingState,
+            info = state[10] as StringResource?,
+            error = state[11] as Exception?,
+            user = state[12] as User?,
+            navigateEpisode = state[13] as Pair<TraktId, Episode>?,
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = initialState,
+    )
+}

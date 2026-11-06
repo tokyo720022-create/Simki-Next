@@ -1,0 +1,173 @@
+package tv.trakt.trakt.core.user.usecases.ratings
+
+import kotlinx.collections.immutable.ImmutableMap
+import kotlinx.collections.immutable.toImmutableMap
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import tv.trakt.trakt.common.data.local.UserRatingsLocalSource
+import tv.trakt.trakt.common.data.remote.UserRatingsRemoteSource
+import tv.trakt.trakt.common.helpers.extensions.asyncMap
+import tv.trakt.trakt.common.model.MediaType
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.ratings.UserRating
+import tv.trakt.trakt.common.model.toTraktId
+
+internal class LoadUserRatingsUseCase(
+    private val remoteSource: UserRatingsRemoteSource,
+    private val localSource: UserRatingsLocalSource,
+) {
+    suspend fun loadLocalShows(): ImmutableMap<TraktId, UserRating> {
+        return localSource.getShows()
+            .associateBy { it.mediaId }
+            .toImmutableMap()
+    }
+
+    suspend fun loadLocalMovies(): ImmutableMap<TraktId, UserRating> {
+        return localSource.getMovies()
+            .associateBy { it.mediaId }
+            .toImmutableMap()
+    }
+
+    suspend fun loadLocalEpisodes(): ImmutableMap<TraktId, UserRating> {
+        return localSource.getEpisodes()
+            .associateBy { it.mediaId }
+            .toImmutableMap()
+    }
+
+    suspend fun loadLocalSeasons(): ImmutableMap<TraktId, UserRating> {
+        return localSource.getSeasons()
+            .associateBy { it.mediaId }
+            .toImmutableMap()
+    }
+
+    suspend fun isShowsLoaded(): Boolean {
+        return localSource.isShowsLoaded()
+    }
+
+    suspend fun isMoviesLoaded(): Boolean {
+        return localSource.isMoviesLoaded()
+    }
+
+    suspend fun isEpisodesLoaded(): Boolean {
+        return localSource.isEpisodesLoaded()
+    }
+
+    suspend fun isSeasonsLoaded(): Boolean {
+        return localSource.isSeasonsLoaded()
+    }
+
+    suspend fun loadShows(): ImmutableMap<TraktId, UserRating> {
+        return remoteSource.getRatingsShows()
+            .asyncMap {
+                UserRating(
+                    mediaId = it.show!!.ids.trakt.toTraktId(),
+                    mediaType = MediaType.Show,
+                    rating = it.rating,
+                )
+            }
+            .also {
+                localSource.setShows(it)
+            }
+            .associateBy { it.mediaId }
+            .toImmutableMap()
+    }
+
+    suspend fun loadMovies(): ImmutableMap<TraktId, UserRating> {
+        return remoteSource.getRatingsMovies()
+            .asyncMap {
+                UserRating(
+                    mediaId = it.movie!!.ids.trakt.toTraktId(),
+                    mediaType = MediaType.Movie,
+                    rating = it.rating,
+                )
+            }
+            .also {
+                localSource.setMovies(it)
+            }
+            .associateBy { it.mediaId }
+            .toImmutableMap()
+    }
+
+    suspend fun loadEpisodes(): ImmutableMap<TraktId, UserRating> {
+        return remoteSource.getRatingsEpisodes()
+            .asyncMap {
+                UserRating(
+                    mediaId = it.episode!!.ids.trakt.toTraktId(),
+                    mediaType = MediaType.Episode,
+                    rating = it.rating,
+                )
+            }
+            .also {
+                localSource.setEpisodes(it)
+            }
+            .associateBy { it.mediaId }
+            .toImmutableMap()
+    }
+
+    suspend fun loadSeasons(): ImmutableMap<TraktId, UserRating> {
+        return remoteSource.getRatingsSeasons()
+            .asyncMap {
+                UserRating(
+                    mediaId = it.season!!.ids.trakt.toTraktId(),
+                    mediaType = MediaType.Season,
+                    rating = it.rating,
+                )
+            }
+            .also {
+                localSource.setSeasons(it)
+            }
+            .associateBy { it.mediaId }
+            .toImmutableMap()
+    }
+
+    suspend fun loadAll(): ImmutableMap<TraktId, UserRating> {
+        return coroutineScope {
+            val showsAsync = async { loadShows() }
+            val moviesAsync = async { loadMovies() }
+            val episodesAsync = async { loadEpisodes() }
+
+            val shows = showsAsync.await()
+            val movies = moviesAsync.await()
+            val episodes = episodesAsync.await()
+
+            (shows + movies + episodes)
+                .toImmutableMap()
+        }
+    }
+
+    suspend fun loadAllIfNeeded(): Triple<
+        ImmutableMap<TraktId, UserRating>,
+        ImmutableMap<TraktId, UserRating>,
+        ImmutableMap<TraktId, UserRating>,
+    > {
+        return coroutineScope {
+            val showsRatingsAsync = async {
+                if (isShowsLoaded()) {
+                    loadLocalShows()
+                } else {
+                    loadShows()
+                }
+            }
+            val moviesRatingsAsync = async {
+                if (isMoviesLoaded()) {
+                    loadLocalMovies()
+                } else {
+                    loadMovies()
+                }
+            }
+            val episodesRatingsAsync = async {
+                if (isEpisodesLoaded()) {
+                    loadLocalEpisodes()
+                } else {
+                    loadEpisodes()
+                }
+            }
+
+            Triple(
+                showsRatingsAsync.await(),
+                moviesRatingsAsync.await(),
+                episodesRatingsAsync.await(),
+            )
+        }
+    }
+}

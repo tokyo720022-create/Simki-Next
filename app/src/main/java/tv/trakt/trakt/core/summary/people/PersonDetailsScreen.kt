@@ -1,0 +1,643 @@
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+
+package tv.trakt.trakt.core.summary.people
+
+import android.content.Context
+import android.content.Intent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Alignment.Companion.TopCenter
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow.Companion.Ellipsis
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.collections.immutable.persistentMapOf
+import kotlinx.collections.immutable.toImmutableMap
+import kotlinx.serialization.json.Json
+import tv.trakt.trakt.common.Config.WEB_V3_BASE_URL
+import tv.trakt.trakt.common.helpers.LoadingState
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.LoadingState.Idle
+import tv.trakt.trakt.common.helpers.extensions.capitalize
+import tv.trakt.trakt.common.helpers.extensions.mediumDateFormat
+import tv.trakt.trakt.common.helpers.extensions.nowLocalDay
+import tv.trakt.trakt.common.helpers.extensions.onClick
+import tv.trakt.trakt.common.helpers.extensions.toMarkdownText
+import tv.trakt.trakt.common.helpers.extensions.toShareUrl
+import tv.trakt.trakt.common.helpers.preview.PreviewData
+import tv.trakt.trakt.common.model.MediaMode
+import tv.trakt.trakt.common.model.Movie
+import tv.trakt.trakt.common.model.Person
+import tv.trakt.trakt.common.model.Show
+import tv.trakt.trakt.common.model.SlugId
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.ui.theme.colors.Shade900
+import tv.trakt.trakt.core.applinks.rememberAppLinkUriHandler
+import tv.trakt.trakt.core.filters.GlobalFiltersSheet
+import tv.trakt.trakt.core.filters.navigation.GlobalFiltersOptions
+import tv.trakt.trakt.core.movies.ui.context.sheet.MovieContextSheet
+import tv.trakt.trakt.core.report.ReportSheet
+import tv.trakt.trakt.core.report.model.ReportTarget
+import tv.trakt.trakt.core.shows.ui.context.sheet.ShowContextSheet
+import tv.trakt.trakt.core.summary.people.all.AllPersonCreditsDestination
+import tv.trakt.trakt.core.summary.people.model.PersonCreditsSection
+import tv.trakt.trakt.core.summary.people.ui.HistoryCreditsList
+import tv.trakt.trakt.core.summary.people.ui.MoviesCreditsList
+import tv.trakt.trakt.core.summary.people.ui.ShowsCreditsList
+import tv.trakt.trakt.core.summary.ui.DetailsBackground
+import tv.trakt.trakt.core.summary.ui.header.DetailsHeader
+import tv.trakt.trakt.helpers.SimpleScrollConnection
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.MediaFilterIcon
+import tv.trakt.trakt.ui.components.mediacards.skeletons.VerticalMediaSkeletonCard
+import tv.trakt.trakt.ui.theme.TraktTheme
+import java.util.Locale
+
+@Composable
+internal fun PersonDetailsScreen(
+    modifier: Modifier = Modifier,
+    viewModel: PersonDetailsViewModel,
+    onNavigateToShow: (TraktId) -> Unit,
+    onNavigateToMovie: (TraktId) -> Unit,
+    onNavigateToAllCredits: (AllPersonCreditsDestination) -> Unit,
+    onNavigateBack: () -> Unit,
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    var contextShowSheet by remember { mutableStateOf<Show?>(null) }
+    var contextMovieSheet by remember { mutableStateOf<Movie?>(null) }
+    var reportSheet by remember { mutableStateOf<ReportTarget?>(null) }
+    var filtersSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(
+        state.navigateShow,
+        state.navigateMovie,
+    ) {
+        state.navigateShow?.let {
+            viewModel.clearNavigation()
+            when {
+                viewModel.isCurrentMediaId(it) -> onNavigateBack()
+                else -> onNavigateToShow(it)
+            }
+        }
+        state.navigateMovie?.let {
+            viewModel.clearNavigation()
+            when {
+                viewModel.isCurrentMediaId(it) -> onNavigateBack()
+                else -> onNavigateToMovie(it)
+            }
+        }
+    }
+
+    PersonDetailsContent(
+        state = state,
+        modifier = modifier,
+        onShowClick = {
+            when {
+                viewModel.isCurrentMediaId(it.ids.trakt) -> onNavigateBack()
+                else -> viewModel.navigateToShow(it)
+            }
+        },
+        onMovieClick = {
+            when {
+                viewModel.isCurrentMediaId(it.ids.trakt) -> onNavigateBack()
+                else -> viewModel.navigateToMovie(it)
+            }
+        },
+        onShowLongClick = {
+            contextShowSheet = it
+        },
+        onMovieLongClick = {
+            contextMovieSheet = it
+        },
+        onShowLinkClick = viewModel::navigateToShow,
+        onMovieLinkClick = viewModel::navigateToMovie,
+        onBackClick = onNavigateBack,
+        onShareClick = viewModel::logShare,
+        onReportClick = {
+            reportSheet = state.personDetails?.let { ReportTarget.Person(it.ids.trakt) }
+        },
+        onFiltersClick = {
+            filtersSheet = true
+        },
+        onMoreClick = { section, position ->
+            val person = state.personDetails ?: return@PersonDetailsContent
+            onNavigateToAllCredits(
+                AllPersonCreditsDestination(
+                    personId = person.ids.trakt.value,
+                    section = section,
+                    position = position,
+                    filterJson = Json.encodeToString(state.filter),
+                ),
+            )
+        },
+    )
+
+    ShowContextSheet(
+        show = contextShowSheet,
+        onDismiss = {
+            contextShowSheet = null
+        },
+    )
+
+    MovieContextSheet(
+        movie = contextMovieSheet,
+        onDismiss = {
+            contextMovieSheet = null
+        },
+    )
+
+    ReportSheet(
+        active = reportSheet != null,
+        target = reportSheet,
+        onDismiss = {
+            reportSheet = null
+        },
+    )
+
+    GlobalFiltersSheet(
+        active = filtersSheet,
+        options = GlobalFiltersOptions(
+            global = false,
+            initial = state.filter,
+        ),
+        onUpdate = viewModel::setFilter,
+        onDismiss = {
+            filtersSheet = false
+        },
+    )
+}
+
+@Composable
+internal fun PersonDetailsContent(
+    state: PersonDetailsState,
+    modifier: Modifier = Modifier,
+    onShowClick: ((Show) -> Unit)? = null,
+    onShowLongClick: ((Show) -> Unit)? = null,
+    onMovieClick: ((Movie) -> Unit)? = null,
+    onMovieLongClick: ((Movie) -> Unit)? = null,
+    onShowLinkClick: ((SlugId) -> Unit)? = null,
+    onMovieLinkClick: ((SlugId) -> Unit)? = null,
+    onBackClick: (() -> Unit)? = null,
+    onShareClick: (() -> Unit)? = null,
+    onReportClick: (() -> Unit)? = null,
+    onFiltersClick: (() -> Unit)? = null,
+    onMoreClick: ((PersonCreditsSection, String?) -> Unit)? = null,
+) {
+    val context = LocalContext.current
+
+    val listState = rememberLazyListState(
+        cacheWindow = LazyLayoutCacheWindow(
+            aheadFraction = 1F,
+            behindFraction = 1F,
+        ),
+    )
+
+    val listScrollConnection = rememberSaveable(
+        saver = SimpleScrollConnection.Saver,
+    ) {
+        SimpleScrollConnection()
+    }
+
+    val sectionPadding = PaddingValues(
+        horizontal = TraktTheme.spacing.mainPageHorizontalSpace,
+    )
+
+    val contentPadding = PaddingValues(
+        top = WindowInsets.statusBars.asPaddingValues()
+            .calculateTopPadding()
+            .plus(16.dp),
+        bottom = WindowInsets.navigationBars.asPaddingValues()
+            .calculateBottomPadding()
+            .plus(TraktTheme.size.navigationBarHeight * 2),
+    )
+
+    Box(
+        contentAlignment = TopCenter,
+        modifier = modifier
+            .fillMaxSize()
+            .background(TraktTheme.colors.backgroundPrimary)
+            .nestedScroll(listScrollConnection),
+    ) {
+        DetailsBackground(
+            imageUrl = state.personBackdropUrl,
+            translation = listScrollConnection.resultOffset,
+            color = TraktTheme.colors.backgroundPrimary,
+        )
+
+        state.personDetails?.let { person ->
+            LazyColumn(
+                state = listState,
+                verticalArrangement = spacedBy(0.dp),
+                contentPadding = contentPadding,
+                overscrollEffect = null,
+            ) {
+                item {
+                    DetailsHeader(
+                        person = person,
+                        loading = state.loadingDetails.isLoading,
+                        onShareClick = {
+                            onShareClick?.invoke()
+                            sharePerson(person, state.user?.settings?.shareCode, context)
+                        },
+                        onReportClick = onReportClick.takeIf { state.user != null },
+                        topRightContent = onFiltersClick?.let { onClick ->
+                            {
+                                MediaFilterIcon(
+                                    active = state.filter.isActive,
+                                    onClick = onClick,
+                                )
+                            }
+                        },
+                        onBackClick = onBackClick ?: {},
+                    )
+                }
+
+                item {
+                    DetailsRow(
+                        person = person,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                start = TraktTheme.spacing.mainPageHorizontalSpace,
+                                end = TraktTheme.spacing.mainPageHorizontalSpace,
+                                bottom = 24.dp,
+                            ),
+                    )
+                }
+
+                item {
+                    AnimatedVisibility(
+                        visible = state.loadingDetails == Done,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
+                    ) {
+                        DetailsOverview(
+                            loading = state.loadingDetails,
+                            overview = person.biography,
+                            onShowLinkClick = onShowLinkClick,
+                            onMovieLinkClick = onMovieLinkClick,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = TraktTheme.spacing.mainPageHorizontalSpace),
+                        )
+                    }
+                }
+
+                item {
+                    AnimatedVisibility(
+                        visible = state.loadingCredits != Idle && state.filter.mode != MediaMode.Movies,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
+                    ) {
+                        ShowsCreditsList(
+                            loading = state.loadingCredits,
+                            person = state.personDetails,
+                            preferredFilter = state.preferredCreditsFilter,
+                            listItems = (state.personShowCredits ?: emptyMap()).toImmutableMap(),
+                            userCollection = state.collection,
+                            sectionPadding = sectionPadding,
+                            contentPadding = sectionPadding,
+                            onClick = onShowClick,
+                            onLongClick = onShowLongClick,
+                            onMoreClick = { onMoreClick?.invoke(PersonCreditsSection.Shows, it) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 24.dp),
+                        )
+                    }
+                }
+
+                item {
+                    AnimatedVisibility(
+                        visible = state.loadingCredits != Idle && state.filter.mode != MediaMode.Shows,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
+                    ) {
+                        MoviesCreditsList(
+                            loading = state.loadingCredits,
+                            person = state.personDetails,
+                            preferredFilter = state.preferredCreditsFilter,
+                            listItems = (state.personMovieCredits ?: emptyMap()).toImmutableMap(),
+                            userCollection = state.collection,
+                            sectionPadding = sectionPadding,
+                            contentPadding = sectionPadding,
+                            onClick = onMovieClick,
+                            onLongClick = onMovieLongClick,
+                            onMoreClick = { onMoreClick?.invoke(PersonCreditsSection.Movies, it) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 32.dp),
+                        )
+                    }
+                }
+
+                if (state.user != null) {
+                    item {
+                        AnimatedVisibility(
+                            visible = state.loadingCredits != Idle,
+                            enter = fadeIn(),
+                            exit = fadeOut(),
+                        ) {
+                            HistoryCreditsList(
+                                loading = state.loadingCredits,
+                                personShowCredits = when (state.filter.mode) {
+                                    MediaMode.Movies -> persistentMapOf()
+                                    MediaMode.Media, MediaMode.Shows -> state.personShowCredits
+                                },
+                                personMovieCredits = when (state.filter.mode) {
+                                    MediaMode.Shows -> persistentMapOf()
+                                    MediaMode.Media, MediaMode.Movies -> state.personMovieCredits
+                                },
+                                userCollection = state.collection,
+                                sectionPadding = sectionPadding,
+                                contentPadding = sectionPadding,
+                                onShowClick = onShowClick,
+                                onMovieClick = onMovieClick,
+                                onShowLongClick = onShowLongClick,
+                                onMovieLongClick = onMovieLongClick,
+                                onMoreClick = { onMoreClick?.invoke(PersonCreditsSection.History, null) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 32.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailsRow(
+    modifier: Modifier = Modifier,
+    person: Person? = null,
+) {
+    val dateFormat = mediumDateFormat()
+    val age = remember(person) { person?.ageInYears(nowLocalDay()) }
+
+    val trailingFact = when (val death = person?.death) {
+        null -> PersonFact(
+            label = stringResource(R.string.header_age),
+            value = age?.toString() ?: "-",
+        )
+
+        else -> PersonFact(
+            label = stringResource(R.string.header_date_of_death),
+            value = death.format(dateFormat).capitalize().let {
+                when (age) {
+                    null -> it
+                    else -> "$it ($age)"
+                }
+            },
+        )
+    }
+
+    val heightFact = person?.heightCm?.let { heightCm ->
+        PersonFact(
+            label = stringResource(R.string.header_height),
+            value = formatHeight(heightCm),
+        )
+    }
+
+    val facts = listOfNotNull(
+        heightFact,
+        PersonFact(
+            label = stringResource(R.string.header_birthday),
+            value = person?.birthday?.format(dateFormat)?.capitalize() ?: "N/A",
+        ),
+        trailingFact,
+    )
+
+    Row(
+        modifier = modifier,
+        horizontalArrangement = spacedBy(
+            space = if (heightFact != null) 16.dp else 24.dp,
+            alignment = Alignment.CenterHorizontally,
+        ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        facts.forEachIndexed { index, fact ->
+            if (index > 0) {
+                Spacer(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(42.dp)
+                        .background(Shade900),
+                )
+            }
+
+            PersonFactColumn(
+                fact = fact,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            )
+        }
+    }
+}
+
+private fun formatHeight(heightCm: Float): String {
+    return String.format(Locale.US, "%.2f m", heightCm / 100)
+}
+
+@Composable
+private fun PersonFactColumn(
+    fact: PersonFact,
+    horizontalAlignment: Alignment.Horizontal,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalAlignment = horizontalAlignment,
+        modifier = modifier,
+    ) {
+        Text(
+            text = fact.label.uppercase(),
+            style = TraktTheme.typography.meta,
+            color = TraktTheme.colors.textSecondary.copy(alpha = 0.7f),
+        )
+        Text(
+            text = fact.value,
+            style = TraktTheme.typography.paragraphSmall,
+            color = TraktTheme.colors.textPrimary,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = Ellipsis,
+        )
+    }
+}
+
+private data class PersonFact(
+    val label: String,
+    val value: String,
+)
+
+@Composable
+private fun DetailsOverview(
+    loading: LoadingState,
+    modifier: Modifier = Modifier,
+    overview: String? = null,
+    onShowLinkClick: ((SlugId) -> Unit)? = null,
+    onMovieLinkClick: ((SlugId) -> Unit)? = null,
+) {
+    var isCollapsed by remember { mutableStateOf(true) }
+
+    val linkUriHandler = rememberAppLinkUriHandler(
+        onShowClick = onShowLinkClick,
+        onMovieClick = onMovieLinkClick,
+    )
+    val placeholder = stringResource(R.string.text_overview_placeholder)
+    val linkColor = TraktTheme.colors.textPrimary
+
+    CompositionLocalProvider(LocalUriHandler provides linkUriHandler) {
+        Text(
+            text = remember(loading.isLoading, overview, placeholder, linkColor) {
+                when {
+                    loading.isLoading -> AnnotatedString("")
+                    overview.isNullOrBlank() -> AnnotatedString(placeholder)
+                    else -> overview.toMarkdownText(linkColor)
+                }
+            },
+            style = TraktTheme.typography.paragraphSmall.copy(
+                lineHeight = 1.3.em,
+            ),
+            color = TraktTheme.colors.textSecondary,
+            maxLines = if (isCollapsed) 6 else Int.MAX_VALUE,
+            textAlign = TextAlign.Start,
+            overflow = Ellipsis,
+            modifier = modifier
+                .onClick {
+                    isCollapsed = !isCollapsed
+                },
+        )
+    }
+}
+
+@Composable
+internal fun ListLoadingView(
+    visible: Boolean = true,
+    contentPadding: PaddingValues,
+) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(space = TraktTheme.spacing.mainRowSpace),
+        contentPadding = contentPadding,
+        userScrollEnabled = false,
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (visible) 1F else 0F),
+    ) {
+        items(count = 12) {
+            VerticalMediaSkeletonCard(
+                chip = true,
+                secondaryChip = true,
+                chipRatio = 0.66F,
+                secondaryChipRatio = 0.5F,
+                chipSpacing = 8.dp,
+            )
+        }
+    }
+}
+
+@Composable
+internal fun ListEmptyView(contentPadding: PaddingValues) {
+    Text(
+        text = stringResource(R.string.list_placeholder_empty),
+        color = TraktTheme.colors.textSecondary,
+        style = TraktTheme.typography.heading6,
+        modifier = Modifier.padding(contentPadding),
+    )
+}
+
+private fun sharePerson(
+    person: Person,
+    shareCode: String?,
+    context: Context,
+) {
+    val shareText = "${WEB_V3_BASE_URL}people/${person.ids.slug.value}".toShareUrl(shareCode)
+    val intent = Intent().apply {
+        action = Intent.ACTION_SEND
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, shareText)
+    }
+
+    context.startActivity(Intent.createChooser(intent, person.name))
+}
+
+@Preview(
+    device = "id:pixel_5",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+)
+@Composable
+private fun Preview() {
+    TraktTheme {
+        PersonDetailsContent(
+            state = PersonDetailsState(
+                personDetails = PreviewData.person1.copy(
+                    biography = "Known for **The Matrix** and [John Wick](https://app.trakt.tv/movies/john-wick-2014).",
+                ),
+                loadingDetails = Done,
+            ),
+        )
+    }
+}
+
+@Preview(
+    device = "id:pixel_5",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+)
+@Composable
+private fun DeceasedPreview() {
+    TraktTheme {
+        PersonDetailsContent(
+            state = PersonDetailsState(
+                personDetails = PreviewData.deceasedPerson,
+                loadingDetails = Done,
+            ),
+        )
+    }
+}

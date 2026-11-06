@@ -1,0 +1,225 @@
+package tv.trakt.trakt.core.calendar.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Alignment.Companion.CenterVertically
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import kotlinx.collections.immutable.persistentListOf
+import tv.trakt.trakt.common.helpers.extensions.capitalize
+import tv.trakt.trakt.common.helpers.extensions.onClick
+import tv.trakt.trakt.common.helpers.extensions.onClickCombined
+import tv.trakt.trakt.common.helpers.extensions.timeFormat
+import tv.trakt.trakt.common.helpers.extensions.toLocal
+import tv.trakt.trakt.common.helpers.preview.PreviewData
+import tv.trakt.trakt.common.model.calendar.CalendarItem
+import tv.trakt.trakt.common.model.rememberEpisodeStatus
+import tv.trakt.trakt.common.ui.composables.FilmProgressIndicator
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.chips.EpisodeStatusChip
+import tv.trakt.trakt.ui.components.chips.InfoChip
+import tv.trakt.trakt.ui.components.mediacards.HorizontalMediaCard
+import tv.trakt.trakt.ui.theme.TraktTheme
+
+@Composable
+internal fun CalendarEpisodeItemView(
+    item: CalendarItem.EpisodeItem,
+    modifier: Modifier = Modifier,
+    itemLoading: Boolean = false,
+    midReleases: Boolean = false,
+    onClick: () -> Unit,
+    onShowClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    onCheckClick: () -> Unit = {},
+    onCheckLongClick: () -> Unit = {},
+    onRemoveClick: () -> Unit = {},
+) {
+    HorizontalMediaCard(
+        modifier = modifier,
+        title = "",
+        more = onLongClick != null,
+        onClick = onClick,
+        onLongClick = onLongClick,
+        containerImageUrl =
+            item.show.images?.getFanartUrl()
+                ?: item.episode.images?.getScreenshotUrl(),
+        cardContent = {
+            val shadowModifier = Modifier.shadow(2.dp, RoundedCornerShape(100))
+            Row(
+                horizontalArrangement = spacedBy(3.dp),
+                verticalAlignment = CenterVertically,
+            ) {
+                val timeFormat = timeFormat()
+                val timeString = remember(item.releasedAt) {
+                    item.releasedAt?.toLocal()?.format(timeFormat)?.capitalize()
+                }
+
+                item.episodes.rememberEpisodeStatus(isLatestAired = midReleases)?.let {
+                    EpisodeStatusChip(
+                        status = it,
+                        modifier = shadowModifier,
+                    )
+                }
+
+                timeString?.let {
+                    InfoChip(
+                        text = timeString,
+                        containerColor = TraktTheme.colors.chipContainerOnContent,
+                        modifier = shadowModifier,
+                    )
+                }
+            }
+        },
+        footerContent = {
+            Row(
+                verticalAlignment = CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(
+                    verticalArrangement = spacedBy(1.dp),
+                    modifier = Modifier
+                        .weight(1F, false)
+                        .onClick(onClick = onShowClick),
+                ) {
+                    Row(
+                        horizontalArrangement = spacedBy(4.dp),
+                        verticalAlignment = CenterVertically,
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_shows_off),
+                            contentDescription = null,
+                            tint = TraktTheme.colors.chipContent,
+                            modifier = Modifier
+                                .size(12.dp)
+                                .graphicsLayer {
+                                    translationY = -(0.5).dp.toPx()
+                                },
+                        )
+
+                        Text(
+                            text = item.show.title,
+                            style = TraktTheme.typography.cardTitle,
+                            color = TraktTheme.colors.textPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+
+                    val subtitle = when {
+                        item.isFullSeason -> stringResource(
+                            R.string.text_season_number,
+                            item.episode.season,
+                        )
+                        item.episodes.size > 1 -> stringResource(
+                            R.string.episode_footer_season_episode_range,
+                            item.episode.season,
+                            item.episodes.first().number,
+                            item.episodes.last().number,
+                        )
+                        else -> item.episode.seasonEpisodeString()
+                    }
+
+                    Text(
+                        text = subtitle,
+                        style = TraktTheme.typography.cardSubtitle,
+                        color = TraktTheme.colors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+
+                if (item.episode.rememberReleased() && !item.isFullSeason) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .padding(start = 12.dp, end = 4.dp)
+                            .size(23.dp),
+                    ) {
+                        when {
+                            itemLoading -> {
+                                FilmProgressIndicator(
+                                    size = 18.dp,
+                                    modifier = Modifier
+                                        .graphicsLayer {
+                                            translationX = 2.dp.toPx()
+                                        },
+                                )
+                            }
+                            item.watched -> {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_check_double),
+                                    contentDescription = null,
+                                    tint = TraktTheme.colors.textPrimary,
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .onClick(onClick = onRemoveClick),
+                                )
+                            }
+                            !item.watched -> {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_check_2),
+                                    contentDescription = null,
+                                    tint = TraktTheme.colors.textPrimary,
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .onClickCombined(
+                                            onClick = onCheckClick,
+                                            onLongClick = onCheckLongClick,
+                                        ),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    )
+}
+
+@Preview
+@Composable
+private fun Preview() {
+    TraktTheme {
+        Column(
+            verticalArrangement = spacedBy(16.dp),
+        ) {
+            listOf(
+                PreviewData.episode1,
+                PreviewData.newEpisode,
+                PreviewData.newPremiereEpisode,
+                PreviewData.newFinaleEpisode,
+                PreviewData.premiereEpisode,
+                PreviewData.finaleEpisode,
+            ).forEach { episode ->
+                CalendarEpisodeItemView(
+                    item = CalendarItem.EpisodeItem(
+                        watched = false,
+                        show = PreviewData.show1,
+                        episodes = persistentListOf(episode),
+                    ),
+                    onClick = {},
+                    onShowClick = {},
+                )
+            }
+        }
+    }
+}

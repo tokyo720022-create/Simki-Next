@@ -1,0 +1,316 @@
+package tv.trakt.trakt.core.home.sections.activity.views.context
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement.spacedBy
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment.Companion.CenterVertically
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow.Companion.Ellipsis
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.ColorImage
+import coil3.annotation.ExperimentalCoilApi
+import coil3.compose.AsyncImagePreviewHandler
+import coil3.compose.LocalAsyncImagePreviewHandler
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.extensions.capitalize
+import tv.trakt.trakt.common.helpers.extensions.longDateTimeFormat
+import tv.trakt.trakt.common.helpers.extensions.toLocal
+import tv.trakt.trakt.common.helpers.preview.PreviewData
+import tv.trakt.trakt.common.model.activity.HomeActivityItem
+import tv.trakt.trakt.common.model.activity.HomeActivityItem.EpisodeItem
+import tv.trakt.trakt.common.model.activity.HomeActivityItem.MovieItem
+import tv.trakt.trakt.core.movies.ui.MovieMetaFooter
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.buttons.GhostButton
+import tv.trakt.trakt.ui.components.confirmation.RemoveConfirmationSheet
+import tv.trakt.trakt.ui.theme.TraktTheme
+import java.time.Instant
+
+@Composable
+internal fun ActivityItemContextView(
+    item: HomeActivityItem,
+    viewModel: ActivityItemContextViewModel,
+    modifier: Modifier = Modifier,
+    onPlayRemove: () -> Unit,
+    onAddWatchlist: () -> Unit,
+    onRemoveWatchlist: () -> Unit,
+    onError: () -> Unit,
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    var confirmRemoveSheet by remember { mutableStateOf(false) }
+    var confirmRemoveWatchlistSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state.loadingRemove, state.loadingWatchlist) {
+        when {
+            state.loadingRemove == Done -> onPlayRemove()
+            state.loadingWatchlist == Done -> when {
+                state.isWatchlist -> onRemoveWatchlist()
+                else -> onAddWatchlist()
+            }
+        }
+    }
+
+    LaunchedEffect(state.error) {
+        if (state.error != null) {
+            onError()
+        }
+    }
+
+    ActivityItemContextViewContent(
+        item = item,
+        state = state,
+        modifier = modifier,
+        onRemoveWatchedClick = {
+            confirmRemoveSheet = true
+        },
+        onWatchlistClick = {
+            when {
+                state.isWatchlist -> confirmRemoveWatchlistSheet = true
+                else -> viewModel.addToWatchlist()
+            }
+        },
+    )
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    RemoveConfirmationSheet(
+        active = confirmRemoveWatchlistSheet,
+        onYes = {
+            confirmRemoveWatchlistSheet = false
+            viewModel.removeFromWatchlist()
+        },
+        onNo = { confirmRemoveWatchlistSheet = false },
+        title = stringResource(R.string.button_text_watchlist),
+        message = stringResource(
+            R.string.warning_prompt_remove_from_watchlist,
+            item.title,
+        ),
+    )
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    RemoveConfirmationSheet(
+        active = confirmRemoveSheet,
+        onYes = {
+            confirmRemoveSheet = false
+            viewModel.removePlayFromHistory()
+        },
+        onNo = { confirmRemoveSheet = false },
+        title = stringResource(R.string.button_text_remove_from_history),
+        message = stringResource(
+            R.string.warning_prompt_remove_single_watched,
+            when (item) {
+                is EpisodeItem -> item.episode.title
+                is MovieItem -> item.movie.title
+            },
+        ),
+    )
+}
+
+@Composable
+private fun ActivityItemContextViewContent(
+    item: HomeActivityItem,
+    state: ActivityItemContextState,
+    modifier: Modifier = Modifier,
+    onRemoveWatchedClick: () -> Unit = {},
+    onWatchlistClick: () -> Unit = {},
+) {
+    Column(
+        verticalArrangement = spacedBy(0.dp),
+        modifier = modifier,
+    ) {
+        Column(
+            verticalArrangement = spacedBy(2.dp),
+        ) {
+            Text(
+                text = item.title,
+                color = TraktTheme.colors.textPrimary,
+                style = TraktTheme.typography.heading3,
+                maxLines = 1,
+                overflow = Ellipsis,
+                autoSize = TextAutoSize.StepBased(
+                    maxFontSize = TraktTheme.typography.heading3.fontSize,
+                    minFontSize = 20.sp,
+                    stepSize = 2.sp,
+                ),
+            )
+
+            if (item is MovieItem) {
+                MovieMetaFooter(
+                    movie = item.movie,
+                    secondary = true,
+                    textStyle = TraktTheme.typography.paragraphSmall,
+                )
+            }
+
+            if (item is EpisodeItem) {
+                Text(
+                    text = item.episode.seasonEpisodeString(),
+                    color = TraktTheme.colors.textSecondary,
+                    style = TraktTheme.typography.paragraphSmall,
+                )
+            }
+
+            Row(
+                horizontalArrangement = spacedBy(4.dp),
+                verticalAlignment = CenterVertically,
+                modifier = Modifier
+                    .padding(top = 18.dp)
+                    .graphicsLayer {
+                        translationX = -1.75.dp.toPx()
+                    },
+            ) {
+                val dateFormat = longDateTimeFormat()
+                val dateText = remember(item.activityAt) {
+                    item.activityAt.toLocal().format(dateFormat).capitalize()
+                }
+                Icon(
+                    painter = painterResource(R.drawable.ic_calendar_check),
+                    contentDescription = null,
+                    tint = TraktTheme.colors.textPrimary,
+                    modifier = Modifier.size(15.dp),
+                )
+                Text(
+                    text = dateText,
+                    color = TraktTheme.colors.textPrimary,
+                    style = TraktTheme.typography.paragraphSmaller,
+                )
+            }
+        }
+
+        Spacer(
+            modifier = Modifier
+                .padding(top = 22.dp)
+                .background(TraktTheme.colors.separator)
+                .fillMaxWidth()
+                .height(1.dp),
+        )
+
+        Column(
+            verticalArrangement = spacedBy(TraktTheme.spacing.contextItemsSpace),
+            modifier = Modifier.padding(top = 14.dp),
+        ) {
+            val isLoadingOrDone = state.loadingRemove.isLoading ||
+                state.loadingRemove.isDone ||
+                state.loadingWatchlist.isLoading ||
+                state.loadingWatchlist.isDone
+
+            GhostButton(
+                enabled = !isLoadingOrDone,
+                loading = state.loadingRemove.isLoading,
+                text = stringResource(R.string.button_text_remove_from_history),
+                onClick = onRemoveWatchedClick,
+                icon = painterResource(R.drawable.ic_close),
+                iconSize = 20.dp,
+                iconSpace = 12.dp,
+                modifier = Modifier
+                    .graphicsLayer {
+                        translationX = -8.dp.toPx()
+                    },
+            )
+
+            if (item is MovieItem) {
+                GhostButton(
+                    enabled = !isLoadingOrDone,
+                    loading = state.loadingWatchlist.isLoading || state.loadingWatchlist.isDone,
+                    text = when {
+                        state.isWatchlist -> stringResource(R.string.button_text_remove_from_watchlist)
+                        else -> stringResource(R.string.button_text_watchlist)
+                    },
+                    onClick = onWatchlistClick,
+                    icon = when {
+                        state.isWatchlist -> painterResource(R.drawable.ic_bookmark_on)
+                        else -> painterResource(R.drawable.ic_bookmark_off)
+                    },
+                    iconSize = 20.dp,
+                    iconSpace = 12.dp,
+                    modifier = Modifier
+                        .graphicsLayer {
+                            translationX = -8.dp.toPx()
+                        },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@Preview(
+    device = "id:pixel_5",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+)
+@Composable
+private fun Preview() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.Blue.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            ActivityItemContextViewContent(
+                state = ActivityItemContextState(),
+                item = EpisodeItem(
+                    id = 1L,
+                    user = PreviewData.user1,
+                    userRating = null,
+                    activity = "watched",
+                    activityAt = Instant.now(),
+                    episode = PreviewData.episode1,
+                    show = PreviewData.show1,
+                ),
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@Preview(
+    device = "id:pixel_5",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+)
+@Composable
+private fun Preview2() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.Blue.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            ActivityItemContextViewContent(
+                state = ActivityItemContextState(),
+                item = MovieItem(
+                    id = 1L,
+                    user = PreviewData.user1,
+                    userRating = null,
+                    activity = "watched",
+                    activityAt = Instant.now(),
+                    movie = PreviewData.movie1,
+                ),
+            )
+        }
+    }
+}

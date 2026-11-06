@@ -1,0 +1,120 @@
+package tv.trakt.trakt.common.data.remote
+
+import org.openapitools.client.apis.CalendarsApi
+import tv.trakt.trakt.common.model.MediaMode
+import tv.trakt.trakt.common.model.globalfilter.GlobalFilter
+import tv.trakt.trakt.common.model.lists.ParentalGuideCategory
+import tv.trakt.trakt.common.networking.CalendarMediaDto
+import tv.trakt.trakt.common.networking.CalendarMovieDto
+import tv.trakt.trakt.common.networking.CalendarShowDto
+import java.time.LocalDate
+
+class UserCalendarRemoteSource(
+    private val calendarsApi: CalendarsApi,
+) {
+    suspend fun getMediaCalendar(
+        startDate: LocalDate,
+        days: Int,
+        filters: GlobalFilter? = null,
+        extended: String = "full,images,colors",
+    ): List<CalendarMediaDto> {
+        val response = calendarsApi.getCalendarsMedia(
+            target = "my",
+            startDate = startDate.toString(),
+            days = days,
+            extended = extended,
+            watchnow = filters?.availability?.joinToString(",") { it.slug },
+            genres = filters?.genresParam,
+            subgenres = filters?.subgenre?.joinToString(","),
+            years = filters?.years?.let { "${it.first}-${it.second}" },
+            ratings = filters?.rating?.let { "${it.first}-${it.second}" },
+            startDate2 = null,
+            endDate = null,
+            runtimes = filters?.runtime?.let { "${it.first}-${it.second}" },
+            countries = filters?.countriesParam,
+            statuses = filters?.statusesParam,
+            certifications = filters?.certificationsParam,
+            parentalNudity = filters?.parentalParam(ParentalGuideCategory.Nudity),
+            parentalViolence = filters?.parentalParam(ParentalGuideCategory.Violence),
+            parentalProfanity = filters?.parentalParam(ParentalGuideCategory.Profanity),
+            parentalAlcohol = filters?.parentalParam(ParentalGuideCategory.Alcohol),
+            parentalFrightening = filters?.parentalParam(ParentalGuideCategory.Frightening),
+            type = when (filters?.mode) {
+                MediaMode.Shows -> "show"
+                MediaMode.Movies -> "movie"
+                MediaMode.Media, null -> null
+            },
+            group = null,
+        )
+        return response.body()
+    }
+
+    suspend fun getShowsCalendar(
+        startDate: LocalDate,
+        days: Int,
+        filters: GlobalFilter? = null,
+        extended: String = "full,images,colors",
+    ): List<CalendarShowDto> {
+        val response = calendarsApi.getCalendarsShows(
+            target = "my",
+            startDate = startDate.toString(),
+            days = days,
+            extended = extended,
+            watchnow = filters?.availability?.joinToString(",") { it.slug },
+            genres = filters?.genresParam,
+            subgenres = filters?.subgenre?.joinToString(","),
+            years = filters?.years?.let { "${it.first}-${it.second}" },
+            ratings = filters?.rating?.let { "${it.first}-${it.second}" },
+            startDate2 = null,
+            endDate = null,
+            runtimes = filters?.runtime?.let { "${it.first}-${it.second}" },
+            countries = filters?.countriesParam,
+            statuses = filters?.statusesParam,
+            certifications = filters?.certificationsParam,
+            parentalNudity = filters?.parentalParam(ParentalGuideCategory.Nudity),
+            parentalViolence = filters?.parentalParam(ParentalGuideCategory.Violence),
+            parentalProfanity = filters?.parentalParam(ParentalGuideCategory.Profanity),
+            parentalAlcohol = filters?.parentalParam(ParentalGuideCategory.Alcohol),
+            parentalFrightening = filters?.parentalParam(ParentalGuideCategory.Frightening),
+            ignoreWatched = filters?.hideWatched,
+            ignoreWatchlisted = filters?.hideWatchlist,
+            ignoreCollected = null,
+            group = null,
+        )
+        return response.body()
+    }
+
+    suspend fun getMoviesCalendar(
+        startDate: LocalDate,
+        days: Int,
+        filters: GlobalFilter? = null,
+        extended: String = "full,images,colors",
+    ): List<CalendarMovieDto> {
+        val response = calendarsApi.getCalendarsMovies(
+            target = "my",
+            startDate = startDate.toString(),
+            days = days,
+            extended = extended,
+            watchnow = filters?.availability?.joinToString(",") { it.slug },
+            genres = filters?.genresParam,
+            subgenres = filters?.subgenre?.joinToString(","),
+            years = filters?.years?.let { "${it.first}-${it.second}" },
+            ratings = filters?.rating?.let { "${it.first}-${it.second}" },
+            startDate2 = null,
+            endDate = null,
+            runtimes = filters?.runtime?.let { "${it.first}-${it.second}" },
+            countries = filters?.countriesParam,
+            statuses = filters?.statusesParam,
+            certifications = filters?.certificationsParam,
+            parentalNudity = filters?.parentalParam(ParentalGuideCategory.Nudity),
+            parentalViolence = filters?.parentalParam(ParentalGuideCategory.Violence),
+            parentalProfanity = filters?.parentalParam(ParentalGuideCategory.Profanity),
+            parentalAlcohol = filters?.parentalParam(ParentalGuideCategory.Alcohol),
+            parentalFrightening = filters?.parentalParam(ParentalGuideCategory.Frightening),
+            ignoreWatched = filters?.hideWatched,
+            ignoreWatchlisted = filters?.hideWatchlist,
+            ignoreCollected = null,
+        )
+        return response.body()
+    }
+}

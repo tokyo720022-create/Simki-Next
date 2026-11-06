@@ -1,0 +1,442 @@
+package tv.trakt.trakt.ui.components.mediacards
+
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CardDefaults.cardColors
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Alignment.Companion.CenterVertically
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush.Companion.verticalGradient
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import coil3.ColorImage
+import coil3.annotation.ExperimentalCoilApi
+import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePreviewHandler
+import coil3.compose.LocalAsyncImagePreviewHandler
+import coil3.request.ImageRequest
+import coil3.request.crossfade
+import tv.trakt.trakt.common.helpers.extensions.onClick
+import tv.trakt.trakt.common.helpers.extensions.onClickCombined
+import tv.trakt.trakt.common.helpers.preview.PreviewData
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.chips.InfoChip
+import tv.trakt.trakt.ui.theme.HorizontalImageAspectRatio
+import tv.trakt.trakt.ui.theme.TraktTheme
+
+@Composable
+internal fun HorizontalMediaCard(
+    title: String,
+    modifier: Modifier = Modifier,
+    containerImageUrl: String? = null,
+    contentImageUrl: String? = null,
+    paletteColor: Color? = null,
+    width: Dp = TraktTheme.size.horizontalMediaCardSize,
+    corner: Dp = 15.dp,
+    more: Boolean = true,
+    watched: Boolean = false,
+    highlighted: Boolean = false,
+    onClick: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
+    footerContent: @Composable (() -> Unit)? = null,
+    cardContent: @Composable (() -> Unit)? = null,
+    cardTopContent: @Composable (() -> Unit)? = null,
+) {
+    var isContainerError by remember(containerImageUrl) { mutableStateOf(false) }
+    var isContentError by remember(contentImageUrl) { mutableStateOf(false) }
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = modifier
+            .sizeIn(maxWidth = TraktTheme.size.horizontalMediaCardSize),
+    ) {
+        Box {
+            Card(
+                modifier = Modifier
+                    .width(width)
+                    .aspectRatio(HorizontalImageAspectRatio)
+                    .then(
+                        if (highlighted) {
+                            Modifier.highlightRing(
+                                color = TraktTheme.colors.accent,
+                                corner = corner,
+                            )
+                        } else {
+                            Modifier
+                        },
+                    ),
+                shape = RoundedCornerShape(corner),
+                elevation = CardDefaults.cardElevation(
+                    defaultElevation = TraktTheme.colors.shadowDynamicSmall,
+                    pressedElevation = TraktTheme.colors.shadowDynamicSmall,
+                    disabledElevation = TraktTheme.colors.shadowDynamicSmall,
+                ),
+                colors = cardColors(
+                    containerColor = TraktTheme.colors.placeholderContainer,
+                ),
+                content = {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .onClickCombined(
+                                onClick = onClick,
+                                onLongClick = onLongClick,
+                            ),
+                    ) {
+                        val isErrorContainer = containerImageUrl == null || isContainerError
+                        val isErrorContent = contentImageUrl == null || isContentError
+
+                        if (!isErrorContainer) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(containerImageUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = title,
+                                contentScale = ContentScale.Crop,
+                                onError = { isContainerError = true },
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .fillMaxSize(),
+                            )
+                        } else {
+                            Image(
+                                painter = painterResource(R.drawable.ic_trakt_icon),
+                                contentDescription = title,
+                                contentScale = ContentScale.Fit,
+                                colorFilter = ColorFilter.tint(TraktTheme.colors.placeholderContent),
+                                modifier = Modifier
+                                    .padding(bottom = 20.dp)
+                                    .size(42.dp)
+                                    .align(Alignment.Center),
+                            )
+                        }
+
+                        if (paletteColor != null && !isErrorContainer) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .fillMaxWidth()
+                                    .fillMaxHeight(0.66F)
+                                    .drawWithCache {
+                                        onDrawBehind {
+                                            drawRect(
+                                                brush = verticalGradient(
+                                                    0f to Color.Transparent,
+                                                    1f to paletteColor.copy(alpha = 0.9F),
+                                                ),
+                                            )
+                                        }
+                                    },
+                            )
+                        }
+
+                        if (contentImageUrl != null && !isContentError) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(contentImageUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = title,
+                                contentScale = ContentScale.Fit,
+                                onError = { isContentError = true },
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = 4.dp)
+                                    .widthIn(max = 110.dp),
+                            )
+                        } else {
+                            Text(
+                                text = title.uppercase(),
+                                style = TraktTheme.typography.buttonTertiary,
+                                color = TraktTheme.colors.textPrimary,
+                                textAlign = TextAlign.Center,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(
+                                        horizontal = 13.dp,
+                                        vertical = if (containerImageUrl == null || isContainerError) 14.dp else 8.dp,
+                                    ),
+                            )
+                        }
+
+                        cardContent?.let {
+                            Box(
+                                modifier = Modifier
+                                    .padding(6.dp)
+                                    .align(Alignment.BottomStart),
+                            ) {
+                                cardContent()
+                            }
+                        }
+
+                        cardTopContent?.let {
+                            Box(
+                                modifier = Modifier
+                                    .padding(6.dp)
+                                    .align(Alignment.TopEnd),
+                            ) {
+                                cardTopContent()
+                            }
+                        }
+
+                        if (more) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_more_vertical),
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier
+                                    .padding(
+                                        horizontal = 5.dp,
+                                        vertical = 10.dp,
+                                    )
+                                    .size(14.dp)
+                                    .align(Alignment.TopEnd)
+                                    .onClick(onClick = onLongClick ?: {}),
+                            )
+                        }
+                    }
+                },
+            )
+
+            if (watched) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .graphicsLayer {
+                            translationY = 6.dp.toPx()
+                        },
+                ) {
+                    CollectionChip(
+                        iconRes = R.drawable.ic_check_double,
+                        iconSize = 11.5.dp,
+                    )
+                }
+            }
+        }
+
+        footerContent?.let {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                footerContent()
+            }
+        }
+    }
+}
+
+private val HighlightRingWidth = 2.dp
+private val HighlightRingGap = 2.dp
+
+private fun Modifier.highlightRing(
+    color: Color,
+    corner: Dp,
+): Modifier =
+    drawBehind {
+        val stroke = HighlightRingWidth.toPx()
+        val inset = HighlightRingGap.toPx() + stroke / 2
+        val radius = corner.toPx() + inset
+
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(-inset, -inset),
+            size = Size(size.width + inset * 2, size.height + inset * 2),
+            cornerRadius = CornerRadius(radius),
+            style = Stroke(width = stroke),
+        )
+    }
+
+@Composable
+private fun CollectionChip(
+    iconRes: Int,
+    iconSize: Dp,
+) {
+    val shape = RoundedCornerShape(100)
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(
+                width = 24.dp,
+                height = 16.dp,
+            )
+            .shadow(1.5.dp, shape)
+            .background(TraktTheme.colors.tagChipContainer, shape),
+    ) {
+        Icon(
+            painter = painterResource(iconRes),
+            tint = TraktTheme.colors.tagChipContent,
+            contentDescription = null,
+            modifier = Modifier.size(iconSize),
+        )
+    }
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@Preview
+@Composable
+private fun Preview() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.LightGray.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            Column(
+                verticalArrangement = spacedBy(16.dp),
+            ) {
+                HorizontalMediaCard(
+                    title = "The Mandalorian",
+                    containerImageUrl = PreviewData.show1.images?.getFanartUrl(),
+                    cardContent = {
+                        InfoChip(
+                            text = "1h 45m",
+                            iconPainter = painterResource(R.drawable.ic_clock),
+                            modifier = Modifier,
+                        )
+                    },
+                    footerContent = {
+                        InfoChip(
+                            text = "1h 45m",
+                            iconPainter = painterResource(R.drawable.ic_clock),
+                            modifier = Modifier,
+                        )
+                    },
+                )
+
+                HorizontalMediaCard(
+                    title = "Empty",
+                    containerImageUrl = PreviewData.show1.images?.getFanartUrl(),
+                    paletteColor = Color(0xFF292525),
+                    highlighted = true,
+                )
+
+                HorizontalMediaCard(
+                    title = "The Last of Us",
+                    footerContent = {
+                        Row(
+                            verticalAlignment = CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier
+                                .fillMaxWidth(),
+                        ) {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(1.dp),
+                                modifier = Modifier.weight(1F, fill = false),
+                            ) {
+                                Text(
+                                    text = "The Last of Us",
+                                    style = TraktTheme.typography.cardTitle,
+                                    color = TraktTheme.colors.textPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+
+                                Text(
+                                    text = "S2 • E3 - Episode",
+                                    style = TraktTheme.typography.cardSubtitle,
+                                    color = TraktTheme.colors.textSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+
+                            Icon(
+                                painter = painterResource(R.drawable.ic_check_2),
+                                contentDescription = null,
+                                tint = TraktTheme.colors.textPrimary,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    },
+                )
+
+                HorizontalMediaCard(
+                    title = "The Last of Us",
+                    watched = true,
+                    footerContent = {
+                        Row(
+                            verticalAlignment = CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier
+                                .fillMaxWidth(),
+                        ) {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(1.dp),
+                                modifier = Modifier.weight(1F, fill = false),
+                            ) {
+                                Text(
+                                    text = "The Last of Us",
+                                    style = TraktTheme.typography.cardTitle,
+                                    color = TraktTheme.colors.textPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+
+                                Text(
+                                    text = "S2 • E3 - Long Long Long Episode Title",
+                                    style = TraktTheme.typography.cardSubtitle,
+                                    color = TraktTheme.colors.textSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+
+                            Icon(
+                                painter = painterResource(R.drawable.ic_check_2),
+                                contentDescription = null,
+                                tint = TraktTheme.colors.textPrimary,
+                                modifier = Modifier
+                                    .padding(start = 8.dp)
+                                    .size(18.dp),
+                            )
+                        }
+                    },
+                )
+            }
+        }
+    }
+}

@@ -1,0 +1,183 @@
+package tv.trakt.trakt.core.summary.movies.di
+
+import org.koin.android.ext.koin.androidApplication
+import org.koin.core.module.dsl.factoryOf
+import org.koin.core.module.dsl.viewModel
+import org.koin.core.module.dsl.viewModelOf
+import org.koin.dsl.module
+import tv.trakt.trakt.common.model.Movie
+import tv.trakt.trakt.core.summary.movies.MovieDetailsViewModel
+import tv.trakt.trakt.core.summary.movies.features.actors.MovieActorsViewModel
+import tv.trakt.trakt.core.summary.movies.features.actors.usecases.GetMovieActorsUseCase
+import tv.trakt.trakt.core.summary.movies.features.actors.usecases.GetMovieDirectorUseCase
+import tv.trakt.trakt.core.summary.movies.features.comments.MovieCommentsViewModel
+import tv.trakt.trakt.core.summary.movies.features.comments.usecases.GetMovieCommentsUseCase
+import tv.trakt.trakt.core.summary.movies.features.context.more.MovieDetailsContextViewModel
+import tv.trakt.trakt.core.summary.movies.features.extras.MovieExtrasViewModel
+import tv.trakt.trakt.core.summary.movies.features.extras.usecases.GetMovieExtrasUseCase
+import tv.trakt.trakt.core.summary.movies.features.history.MovieHistoryViewModel
+import tv.trakt.trakt.core.summary.movies.features.history.usecases.GetMovieHistoryUseCase
+import tv.trakt.trakt.core.summary.movies.features.info.MovieInfoViewModel
+import tv.trakt.trakt.core.summary.movies.features.info.usecase.GetMovieCrewUseCase
+import tv.trakt.trakt.core.summary.movies.features.info.usecase.GetMovieStatsUseCase
+import tv.trakt.trakt.core.summary.movies.features.info.usecase.GetMovieStudiosUseCase
+import tv.trakt.trakt.core.summary.movies.features.lists.MovieListsViewModel
+import tv.trakt.trakt.core.summary.movies.features.lists.usecases.GetMovieListsUseCase
+import tv.trakt.trakt.core.summary.movies.features.related.MovieRelatedViewModel
+import tv.trakt.trakt.core.summary.movies.features.related.usecases.GetMovieRelatedUseCase
+import tv.trakt.trakt.core.summary.movies.features.sentiment.MovieSentimentViewModel
+import tv.trakt.trakt.core.summary.movies.features.sentiment.usecases.GetMovieSentimentUseCase
+import tv.trakt.trakt.core.summary.movies.features.socials.GetMovieSocialsUseCase
+import tv.trakt.trakt.core.summary.movies.features.streaming.MovieStreamingsViewModel
+import tv.trakt.trakt.core.summary.movies.features.trivia.MovieTriviaViewModel
+import tv.trakt.trakt.core.summary.movies.features.trivia.usecases.GetMovieTriviaUseCase
+import tv.trakt.trakt.core.summary.movies.usecases.GetMovieDetailsUseCase
+import tv.trakt.trakt.core.summary.movies.usecases.GetMovieRatingsUseCase
+
+internal val movieDetailsModule = module {
+    factoryOf(::GetMovieDetailsUseCase)
+    factoryOf(::GetMovieRatingsUseCase)
+    factoryOf(::GetMovieStudiosUseCase)
+    factoryOf(::GetMovieStatsUseCase)
+    factoryOf(::GetMovieExtrasUseCase)
+    factoryOf(::GetMovieActorsUseCase)
+    factoryOf(::GetMovieDirectorUseCase)
+    factoryOf(::GetMovieCrewUseCase)
+    factoryOf(::GetMovieRelatedUseCase)
+    factoryOf(::GetMovieSentimentUseCase)
+    factoryOf(::GetMovieHistoryUseCase)
+    factoryOf(::GetMovieCommentsUseCase)
+    factoryOf(::GetMovieListsUseCase)
+    factoryOf(::GetMovieTriviaUseCase)
+    factoryOf(::GetMovieSocialsUseCase)
+
+    viewModel {
+        MovieDetailsViewModel(
+            appContext = androidApplication(),
+            savedStateHandle = get(),
+            getDetailsUseCase = get(),
+            getExternalRatingsUseCase = get(),
+            getMovieDirectorUseCase = get(),
+            getMovieTranslationsUseCase = get(),
+            getMovieSocialsUseCase = get(),
+            loadProgressUseCase = get(),
+            loadWatchlistUseCase = get(),
+            loadListsUseCase = get(),
+            loadRatingUseCase = get(),
+            loadFavoritesUseCase = get(),
+            updateMovieHistoryUseCase = get(),
+            updateMovieWatchlistUseCase = get(),
+            updateMovieFavoritesUseCase = get(),
+            appReviewUseCase = get(),
+            userWatchlistLocalSource = get(),
+            userWatchlistMinLocalSource = get(),
+            userFavoritesLocalSource = get(),
+            dataChanges = get(),
+            sessionManager = get(),
+            checkInManager = get(),
+            errorsManager = get(),
+            analytics = get(),
+        )
+    }
+
+    viewModel { (movie: Movie) ->
+        MovieInfoViewModel(
+            movie = movie,
+            getStatsUseCase = get(),
+            getStudiosUseCase = get(),
+            getCrewUseCase = get(),
+            parentalGuideSource = get(),
+        )
+    }
+
+    viewModel { (movie: Movie) ->
+        MovieStreamingsViewModel(
+            movie = movie,
+            sessionManager = get(),
+            getStreamingsUseCase = get(),
+            getYouTubeSpecialUseCase = get(),
+            collapsingManager = get(),
+            analytics = get(),
+        )
+    }
+
+    viewModel { (movie: Movie) ->
+        MovieExtrasViewModel(
+            movie = movie,
+            getExtrasUseCase = get(),
+            collapsingManager = get(),
+        )
+    }
+
+    viewModel { (movie: Movie) ->
+        MovieActorsViewModel(
+            movie = movie,
+            getActorsUseCase = get(),
+            collapsingManager = get(),
+        )
+    }
+
+    viewModel { (movie: Movie) ->
+        MovieRelatedViewModel(
+            movie = movie,
+            getRelatedMoviesUseCase = get(),
+            collectionStateProvider = get(),
+            collapsingManager = get(),
+        )
+    }
+
+    viewModel { (movie: Movie) ->
+        MovieListsViewModel(
+            movie = movie,
+            getListsUseCase = get(),
+            loadUserLikedListsUseCase = get(),
+            collapsingManager = get(),
+        )
+    }
+
+    viewModelOf(::MovieHistoryViewModel)
+
+    viewModel { (movie: Movie) ->
+        MovieSentimentViewModel(
+            movie = movie,
+            getSentimentUseCase = get(),
+            collapsingManager = get(),
+            sessionManager = get(),
+        )
+    }
+
+    viewModel { (movie: Movie) ->
+        MovieTriviaViewModel(
+            movie = movie,
+            getTriviaUseCase = get(),
+            collapsingManager = get(),
+            sessionManager = get(),
+        )
+    }
+
+    viewModel { (movie: Movie) ->
+        MovieCommentsViewModel(
+            appContext = androidApplication(),
+            movie = movie,
+            getFilterUseCase = get(),
+            getLanguageUseCase = get(),
+            getCommentsUseCase = get(),
+            getCommentReactionsUseCase = get(),
+            loadUserReactionsUseCase = get(),
+            dataChanges = get(),
+            sessionManager = get(),
+            collapsingManager = get(),
+            translationsStore = get(),
+            analytics = get(),
+        )
+    }
+
+    viewModel { (movie: Movie) ->
+        MovieDetailsContextViewModel(
+            movie = movie,
+            sessionManager = get(),
+            getStreamingsUseCase = get(),
+            analytics = get(),
+        )
+    }
+}

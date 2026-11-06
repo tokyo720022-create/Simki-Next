@@ -1,0 +1,503 @@
+package tv.trakt.trakt.core.checkin.data
+
+import android.content.Context
+import com.google.firebase.crashlytics.CustomKeysAndValues
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import org.openapitools.client.models.PostCheckinStart200Response
+import timber.log.Timber
+import tv.trakt.trakt.common.auth.session.SessionManager
+import tv.trakt.trakt.common.core.sync.changes.ChangeOrigin
+import tv.trakt.trakt.common.core.sync.changes.DataChange.Kind
+import tv.trakt.trakt.common.core.sync.changes.DataChanges
+import tv.trakt.trakt.common.core.user.usecases.lists.LoadUserWatchlistUseCase
+import tv.trakt.trakt.common.core.user.usecases.progress.LoadUserProgressUseCase
+import tv.trakt.trakt.common.data.remote.CheckInRemoteSource
+import tv.trakt.trakt.common.data.remote.UserRemoteSource
+import tv.trakt.trakt.common.firebase.analytics.Analytics
+import tv.trakt.trakt.common.helpers.extensions.recordError
+import tv.trakt.trakt.common.helpers.extensions.rethrowCancellation
+import tv.trakt.trakt.common.helpers.extensions.toInstant
+import tv.trakt.trakt.common.model.Episode
+import tv.trakt.trakt.common.model.Movie
+import tv.trakt.trakt.common.model.SeasonEpisode
+import tv.trakt.trakt.common.model.Show
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.fromDto
+import tv.trakt.trakt.common.networking.helpers.CacheMarkerProvider
+import tv.trakt.trakt.core.checkin.data.service.CheckInService
+import tv.trakt.trakt.core.checkin.data.service.CheckInServiceData
+import tv.trakt.trakt.core.checkin.model.CheckInState
+import tv.trakt.trakt.core.checkin.model.CheckInState.ActiveEpisode
+import tv.trakt.trakt.core.checkin.model.CheckInState.ActiveMovie
+import tv.trakt.trakt.core.checkin.model.afterCredits
+import tv.trakt.trakt.core.checkin.model.expiresAt
+import tv.trakt.trakt.core.checkin.model.id
+import tv.trakt.trakt.core.checkin.model.startedAt
+import tv.trakt.trakt.core.checkin.model.type
+import tv.trakt.trakt.resources.R
+import kotlin.time.Clock.System.now
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
+
+private val ACTIVE_CHECK_COOLDOWN = 10.seconds
+
+internal class DefaultCheckInManager(
+    private val sessionManager: SessionManager,
+    private val dataChanges: DataChanges,
+    private val checkInRemoteSource: CheckInRemoteSource,
+    private val userRemoteSource: UserRemoteSource,
+    private val cacheMarkerProvider: CacheMarkerProvider,
+    private val loadUserProgressUseCase: LoadUserProgressUseCase,
+    private val loadUserWatchlistMinUseCase: LoadUserWatchlistUseCase,
+    private val analytics: Analytics,
+) : CheckInManager {
+    private val state = MutableStateFlow<CheckInState>(CheckInState.Idle)
+    private var lastCheckAt: Instant? = null
+
+    private val mutex = Mutex()
+
+    override fun observe(): Flow<CheckInState> {
+        return state.asStateFlow()
+    }
+
+    override suspend fun startEpisode(
+        showId: TraktId,
+        seasonEpisode: SeasonEpisode,
+        origin: ChangeOrigin?,
+        context: Context,
+    ) {
+        mutex.withLock {
+            startEpisodeLocked(
+                showId = showId,
+                seasonEpisode = seasonEpisode,
+                origin = origin,
+                context = context,
+            )
+        }
+    }
+
+    private suspend fun startEpisodeLocked(
+        showId: TraktId,
+        seasonEpisode: SeasonEpisode,
+        origin: ChangeOrigin?,
+        context: Context,
+    ) {
+        if (state.value.isActive()) {
+            Timber.d("Another check-in is already active, skipping new episode check-in.")
+            return
+        }
+
+        if (!sessionManager.isAuthenticated()) {
+            Timber.d("Not authenticated, skipping check-in.")
+            return
+        }
+
+        state.update { CheckInState.Loading }
+        Timber.d("Checking in episode $seasonEpisode of show: ${showId.value}")
+
+        var checkIn: PostCheckinStart200Response? = null
+        try {
+            checkIn = checkInRemoteSource.postEpisodeCheckIn(
+                showId = showId,
+                season = seasonEpisode.season,
+                episode = seasonEpisode.episode,
+            )
+            cacheMarkerProvider.invalidate()
+
+            delay(300.milliseconds)
+            var watching = userRemoteSource.getWatchingNow()
+            if (watching == null) {
+                // Wait a bit longer for the check-in to be reflected in replica.
+                delay(2.seconds)
+                watching = userRemoteSource.getWatchingNow()
+                if (watching == null) {
+                    throw Exception("Oops! No active watching now found after check-in.")
+                }
+            }
+
+            watching.episode?.let { dto ->
+                val activeState = ActiveEpisode(
+                    show = Show.fromDto(watching.show!!),
+                    episode = Episode.fromDto(dto),
+                    startedAt = watching.startedAt.toInstant(),
+                    expiresAt = watching.expiresAt.toInstant(),
+                )
+
+                state.update { activeState }
+                startForegroundService(context, activeState)
+                analytics.progress.logCheckInStart(mediaType = "episode")
+
+                coroutineScope {
+                    val progressAsync = async { loadProgressIfNeeded(activeState) }
+                    val watchlistAsync = async { loadWatchlistIfNeeded(activeState) }
+                    awaitAll(progressAsync, watchlistAsync)
+                }
+                dataChanges.notify(Kind.CheckIn, origin = origin)
+
+                Timber.d("Successfully checked in episode: ${dto.title} S${dto.season}E${dto.number}")
+            }
+        } catch (error: Exception) {
+            error.rethrowCancellation {
+                state.update { CheckInState.Error(error) }
+                Timber.recordError(
+                    error = error,
+                    keysValues = CustomKeysAndValues.Builder()
+                        .putString("checkin_media_type", "episode")
+                        .putInt("checkin_trakt_id", showId.value)
+                        .putInt("checkin_season", seasonEpisode.season)
+                        .putInt("checkin_episode", seasonEpisode.episode)
+                        .putCheckIn(checkIn)
+                        .build(),
+                )
+            }
+        }
+    }
+
+    override suspend fun startMovie(
+        movieId: TraktId,
+        origin: ChangeOrigin?,
+        context: Context,
+    ) {
+        mutex.withLock {
+            startMovieLocked(
+                movieId = movieId,
+                origin = origin,
+                context = context,
+            )
+        }
+    }
+
+    private suspend fun startMovieLocked(
+        movieId: TraktId,
+        origin: ChangeOrigin?,
+        context: Context,
+    ) {
+        if (state.value.isActive()) {
+            Timber.d("Another check-in is already active, skipping new movie check-in.")
+            return
+        }
+
+        if (!sessionManager.isAuthenticated()) {
+            Timber.d("Not authenticated, skipping check-in.")
+            return
+        }
+
+        state.update { CheckInState.Loading }
+        Timber.d("Checking in movie with ID: ${movieId.value}")
+
+        var checkIn: PostCheckinStart200Response? = null
+        try {
+            checkIn = checkInRemoteSource.postMovieCheckIn(movieId)
+            cacheMarkerProvider.invalidate()
+
+            delay(300.milliseconds)
+            var watching = userRemoteSource.getWatchingNow()
+            if (watching == null) {
+                // Wait a bit longer for the check-in to be reflected in replica.
+                delay(2.seconds)
+                watching = userRemoteSource.getWatchingNow()
+                if (watching == null) {
+                    throw Exception("Oops! No active watching now found after check-in.")
+                }
+            }
+
+            watching.movie?.let { dto ->
+                val activeState = ActiveMovie(
+                    movie = Movie.fromDto(dto),
+                    startedAt = watching.startedAt.toInstant(),
+                    expiresAt = watching.expiresAt.toInstant(),
+                )
+
+                state.update { activeState }
+                startForegroundService(context, activeState)
+                analytics.progress.logCheckInStart(mediaType = "movie")
+
+                coroutineScope {
+                    val progressAsync = async { loadProgressIfNeeded(activeState) }
+                    val watchlistAsync = async { loadWatchlistIfNeeded(activeState) }
+                    awaitAll(progressAsync, watchlistAsync)
+                }
+                dataChanges.notify(Kind.CheckIn, origin = origin)
+
+                Timber.d("Successfully checked in movie: ${dto.title} (${dto.year})")
+            }
+        } catch (error: Exception) {
+            error.rethrowCancellation {
+                state.update { CheckInState.Error(error) }
+                Timber.recordError(
+                    error = error,
+                    keysValues = CustomKeysAndValues.Builder()
+                        .putString("checkin_media_type", "movie")
+                        .putInt("checkin_trakt_id", movieId.value)
+                        .putCheckIn(checkIn)
+                        .build(),
+                )
+            }
+        }
+    }
+
+    override fun isActive(): Boolean {
+        return when (state.value) {
+            is ActiveMovie, is ActiveEpisode -> true
+            else -> false
+        }
+    }
+
+    override fun isActiveMovie(): ActiveMovie? {
+        return state.value as? ActiveMovie
+    }
+
+    override suspend fun checkActive(context: Context) {
+        if (!sessionManager.isAuthenticated()) {
+            Timber.d("Not authenticated, skipping check-in stop.")
+            return
+        }
+
+        if (mutex.isLocked) {
+            Timber.d("Check-in operation in progress, skipping active check.")
+            return
+        }
+
+        mutex.withLock {
+            checkActiveLocked(context)
+        }
+    }
+
+    private suspend fun checkActiveLocked(context: Context) {
+        lastCheckAt?.let { lastCheck ->
+            if (now().minus(ACTIVE_CHECK_COOLDOWN) < lastCheck) {
+                Timber.d("Last check-in check was too recent, skipping redundant check.")
+                return
+            }
+        }
+
+        try {
+            val response = userRemoteSource.getWatchingNow()
+            if (response == null) {
+                cacheMarkerProvider.invalidate()
+
+                if (state.value.isActive()) {
+                    loadProgressIfNeeded(state.value)
+                    dataChanges.notify(Kind.CheckIn)
+                }
+
+                stopLocked(origin = null, context = context)
+                Timber.d("No active check-ins / scrobbles found.")
+                return
+            }
+
+            response.movie?.let { dto ->
+                val newState = ActiveMovie(
+                    movie = Movie.fromDto(dto),
+                    startedAt = response.startedAt.toInstant(),
+                    expiresAt = response.expiresAt.toInstant(),
+                )
+
+                // Only update state if it's a different movie than currently stored
+                if (state.value !is ActiveMovie || state.value.id != newState.id) {
+                    cacheMarkerProvider.invalidate()
+                    state.update { newState }
+                    startForegroundService(context, newState)
+
+                    coroutineScope {
+                        val progressAsync = async { loadProgressIfNeeded(newState) }
+                        val watchlistAsync = async { loadWatchlistIfNeeded(newState) }
+                        awaitAll(progressAsync, watchlistAsync)
+                    }
+                    dataChanges.notify(Kind.CheckIn)
+
+                    Timber.d("New active movie check-in found: ${dto.title} (${dto.year})")
+                }
+            }
+
+            response.episode?.let { dto ->
+                val newState = ActiveEpisode(
+                    show = Show.fromDto(response.show!!),
+                    episode = Episode.fromDto(dto),
+                    startedAt = response.startedAt.toInstant(),
+                    expiresAt = response.expiresAt.toInstant(),
+                )
+
+                // Only update state if it's a different episode than currently stored
+                if (state.value !is ActiveEpisode || state.value.id != newState.id) {
+                    cacheMarkerProvider.invalidate()
+                    state.update { newState }
+                    startForegroundService(context, newState)
+
+                    coroutineScope {
+                        val progressAsync = async { loadProgressIfNeeded(newState) }
+                        val watchlistAsync = async { loadWatchlistIfNeeded(newState) }
+                        awaitAll(progressAsync, watchlistAsync)
+                    }
+                    dataChanges.notify(Kind.CheckIn)
+
+                    Timber.d("New active episode check-in found: ${dto.title} S${dto.season}E${dto.number}")
+                }
+            }
+        } catch (error: Exception) {
+            error.rethrowCancellation {
+                Timber.recordError(error)
+            }
+        } finally {
+            lastCheckAt = now()
+        }
+    }
+
+    override suspend fun stop(
+        origin: ChangeOrigin?,
+        context: Context,
+    ) {
+        mutex.withLock {
+            stopLocked(origin, context)
+        }
+    }
+
+    private suspend fun stopLocked(
+        origin: ChangeOrigin?,
+        context: Context,
+    ) {
+        if (!sessionManager.isAuthenticated()) {
+            Timber.d("Not authenticated, skipping check-in stop.")
+            return
+        }
+
+        val currentState = state.value
+        state.update { CheckInState.Idle }
+
+        try {
+            checkInRemoteSource.deleteAll()
+            cacheMarkerProvider.invalidate()
+
+            currentState.analyticsType()?.let(analytics.progress::logCheckInStop)
+            CheckInService.stop(context.applicationContext)
+
+            loadProgressIfNeeded(currentState)
+            if (currentState != CheckInState.Idle) {
+                dataChanges.notify(Kind.CheckIn, origin = origin)
+            }
+
+            Timber.d("Stopped check-in.")
+        } catch (error: Exception) {
+            error.rethrowCancellation {
+                Timber.recordError(error)
+            }
+        }
+    }
+
+    private suspend fun loadProgressIfNeeded(state: CheckInState) {
+        try {
+            when (state) {
+                is ActiveMovie -> loadUserProgressUseCase.loadMoviesProgress()
+                is ActiveEpisode -> loadUserProgressUseCase.loadShowsProgress()
+                else -> Unit
+            }
+        } catch (error: Exception) {
+            error.rethrowCancellation {
+                // Log but ignore errors here
+                Timber.recordError(error)
+            }
+        }
+    }
+
+    private suspend fun loadWatchlistIfNeeded(state: CheckInState) {
+        try {
+            when (state) {
+                is ActiveMovie, is ActiveEpisode -> {
+                    loadUserWatchlistMinUseCase.loadWatchlist()
+                }
+                else -> {}
+            }
+        } catch (error: Exception) {
+            error.rethrowCancellation {
+                // Log but ignore errors here
+                Timber.recordError(error)
+            }
+        }
+    }
+
+    private fun startForegroundService(
+        context: Context,
+        state: CheckInState,
+    ) {
+        val type = state.type
+        val startedAt = state.startedAt
+        val expiresAt = state.expiresAt
+
+        if (type == null || startedAt == null || expiresAt == null) {
+            Timber.d("Invalid check-in state for starting service, missing required data.")
+            return
+        }
+
+        val episodeState = state as? ActiveEpisode
+        val data = CheckInServiceData(
+            mediaId = state.id ?: -1,
+            mediaType = type,
+            title = when (state) {
+                is ActiveMovie -> {
+                    state.movie.title
+                }
+                is ActiveEpisode -> {
+                    val seasonEpisode =
+                        context.getString(
+                            R.string.episode_footer_season_episode,
+                            state.episode.season,
+                            state.episode.number,
+                        )
+                    "${state.show.title} - $seasonEpisode"
+                }
+                else -> {
+                    ""
+                }
+            },
+            mediaTitle = when (state) {
+                is ActiveMovie -> state.movie.title
+                is ActiveEpisode -> state.show.title
+                else -> null
+            },
+            mediaImage = when (state) {
+                is ActiveMovie -> state.movie.images?.getFanartUrl()
+                is ActiveEpisode -> state.show.images?.getFanartUrl()
+                else -> null
+            },
+            startedAt = startedAt,
+            expiresAt = expiresAt,
+            afterCredits = state.afterCredits,
+            extraId = episodeState?.show?.ids?.trakt?.value,
+            extraValue1 = episodeState?.episode?.season,
+            extraValue2 = episodeState?.episode?.number,
+        )
+
+        CheckInService.start(
+            context = context,
+            data = data,
+        )
+    }
+
+    private fun CustomKeysAndValues.Builder.putCheckIn(
+        checkIn: PostCheckinStart200Response?,
+    ): CustomKeysAndValues.Builder {
+        return this
+            .putBoolean("checkin_response_parsed", checkIn != null)
+            .putLong("checkin_history_id", checkIn?.id ?: -1)
+            .putString("checkin_watched_at", checkIn?.watchedAt ?: "none")
+            .putString("checkin_device_time", now().toString())
+    }
+}
+
+private fun CheckInState.analyticsType(): String? {
+    return when (this) {
+        is ActiveMovie -> "movie"
+        is ActiveEpisode -> "episode"
+        CheckInState.Idle, CheckInState.Loading, is CheckInState.Error -> null
+    }
+}

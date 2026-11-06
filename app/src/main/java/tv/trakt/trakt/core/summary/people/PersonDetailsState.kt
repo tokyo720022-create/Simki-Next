@@ -1,0 +1,29 @@
+package tv.trakt.trakt.core.summary.people
+
+import androidx.compose.runtime.Immutable
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableMap
+import tv.trakt.trakt.common.core.user.UserCollectionState
+import tv.trakt.trakt.common.helpers.LoadingState
+import tv.trakt.trakt.common.model.Person
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.common.model.globalfilter.GlobalFilter
+import tv.trakt.trakt.core.summary.people.model.PersonCreditItem
+
+@Immutable
+internal data class PersonDetailsState(
+    val user: User? = null,
+    val personDetails: Person? = null,
+    val personBackdropUrl: String? = null,
+    val preferredCreditsFilter: String? = null,
+    val personShowCredits: ImmutableMap<String, ImmutableList<PersonCreditItem.ShowItem>>? = null,
+    val personMovieCredits: ImmutableMap<String, ImmutableList<PersonCreditItem.MovieItem>>? = null,
+    val collection: UserCollectionState = UserCollectionState.Default,
+    val filter: GlobalFilter = GlobalFilter.Default,
+    val loadingDetails: LoadingState = LoadingState.Idle,
+    val loadingCredits: LoadingState = LoadingState.Idle,
+    val navigateShow: TraktId? = null,
+    val navigateMovie: TraktId? = null,
+    val error: Exception? = null,
+)

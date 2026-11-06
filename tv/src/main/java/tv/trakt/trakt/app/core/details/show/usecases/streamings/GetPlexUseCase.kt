@@ -1,0 +1,37 @@
+package tv.trakt.trakt.app.core.details.show.usecases.streamings
+
+import tv.trakt.trakt.common.data.local.ShowLocalSource
+import tv.trakt.trakt.common.data.remote.ShowsRemoteSource
+import tv.trakt.trakt.common.data.remote.ShowsSyncRemoteSource
+import tv.trakt.trakt.common.model.Show
+import tv.trakt.trakt.common.model.SlugId
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.fromDto
+
+internal class GetPlexUseCase(
+    private val remoteSyncSource: ShowsSyncRemoteSource,
+    private val remoteShowSource: ShowsRemoteSource,
+    private val localShowSource: ShowLocalSource,
+) {
+    suspend fun getPlexStatus(showId: TraktId): Result {
+        var show = localShowSource.getShow(showId)
+
+        // If we don't have the show or it doesn't have a Plex ID, fetch details from remote and update.
+        if (show == null || show.ids.plex == null) {
+            show = remoteShowSource.getShowDetails(showId)
+                .let { Show.fromDto(it) }
+                .also { localShowSource.upsertShows(listOf(it)) }
+        }
+
+        val result = remoteSyncSource.getShowsPlexCollection()
+        return Result(
+            isPlex = result.containsKey(showId) && show?.ids?.plex != null,
+            plexSlug = show?.ids?.plex,
+        )
+    }
+
+    data class Result(
+        val isPlex: Boolean,
+        val plexSlug: SlugId?,
+    )
+}

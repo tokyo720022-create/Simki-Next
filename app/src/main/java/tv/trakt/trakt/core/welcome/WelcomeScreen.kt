@@ -1,0 +1,354 @@
+package tv.trakt.trakt.core.welcome
+
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Arrangement.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush.Companion.verticalGradient
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.window.core.layout.WindowSizeClass
+import coil3.ColorImage
+import coil3.annotation.ExperimentalCoilApi
+import coil3.compose.AsyncImagePreviewHandler
+import coil3.compose.LocalAsyncImagePreviewHandler
+import tv.trakt.trakt.common.ui.theme.colors.Purple1000
+import tv.trakt.trakt.common.ui.theme.colors.Purple500
+import tv.trakt.trakt.common.ui.theme.colors.Purple900
+import tv.trakt.trakt.common.ui.theme.colors.Shade800
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.buttons.PrimaryButton
+import tv.trakt.trakt.ui.extensions.isAtLeastMedium
+import tv.trakt.trakt.ui.theme.DefaultCardShape
+import tv.trakt.trakt.ui.theme.TraktTheme
+
+@Composable
+internal fun WelcomeScreen(
+    modifier: Modifier = Modifier,
+    onDismiss: () -> Unit,
+) {
+    val windowClass = currentWindowAdaptiveInfo().windowSizeClass
+
+    val backgroundColor1 = TraktTheme.colors.backgroundPrimary
+    val backgroundColor2 = Purple900.copy(alpha = 0.75F)
+
+    val backgroundGradient = remember {
+        verticalGradient(
+            colors = listOf(
+                backgroundColor1,
+                backgroundColor2,
+            ),
+        )
+    }
+
+    val contentPadding = PaddingValues(
+        top = WindowInsets.statusBars.asPaddingValues()
+            .calculateTopPadding()
+            .plus(
+                when {
+                    windowClass.isAtLeastMedium() -> 64.dp
+                    else -> 32.dp
+                },
+            ),
+        bottom = WindowInsets.navigationBars.asPaddingValues()
+            .calculateBottomPadding(),
+    )
+
+    val scrollState = rememberScrollState()
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(backgroundColor1),
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .fillMaxHeight(0.75F)
+                .background(backgroundGradient),
+        )
+
+        Column(
+            verticalArrangement = Arrangement.Top,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth()
+                .verticalScroll(scrollState)
+                .padding(contentPadding),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = spacedBy(12.dp),
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.ic_trakt_icon),
+                    contentDescription = null,
+                    modifier = Modifier.size(50.dp),
+                )
+                Icon(
+                    painter = painterResource(R.drawable.ic_trakt_logo),
+                    contentDescription = null,
+                    tint = Color.White,
+                )
+            }
+
+            Column(
+                verticalArrangement = spacedBy(42.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .padding(horizontal = 24.dp)
+                    .padding(
+                        top = 64.dp,
+                        bottom = 16.dp,
+                    ),
+            ) {
+                WelcomeItem(
+                    title = stringResource(R.string.header_landing_discover),
+                    subtitle = stringResource(R.string.text_landing_discover),
+                    iconPainter = painterResource(R.drawable.ic_discover_on),
+                )
+
+                WelcomeItem(
+                    title = stringResource(R.string.header_landing_track),
+                    subtitle = stringResource(R.string.text_landing_track),
+                    iconPainter = painterResource(R.drawable.ic_check_double),
+                )
+
+                WelcomeItem(
+                    title = stringResource(R.string.header_landing_share),
+                    subtitle = stringResource(R.string.text_landing_share),
+                    iconPainter = painterResource(R.drawable.ic_share),
+                )
+            }
+
+            Spacer(modifier = Modifier.height(256.dp))
+        }
+
+        WelcomeFooter(
+            onDismiss = onDismiss,
+            windowClass = windowClass,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(
+                    bottom = WindowInsets.navigationBars.asPaddingValues()
+                        .calculateBottomPadding(),
+                ),
+        )
+    }
+}
+
+@Composable
+private fun WelcomeItem(
+    title: String,
+    subtitle: String,
+    iconPainter: Painter,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier,
+    ) {
+        Text(
+            text = "  ${title.lowercase()}  ",
+            style = TraktTheme.typography.heading1.copy(
+                fontSize = 64.sp,
+                letterSpacing = 6.sp,
+            ),
+            textAlign = TextAlign.Center,
+            color = Color.White,
+            maxLines = 3,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .blur(8.dp)
+                .alpha(0.04F),
+        )
+
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = spacedBy(0.dp),
+        ) {
+            Icon(
+                painter = iconPainter,
+                contentDescription = null,
+                tint = Purple500,
+                modifier = Modifier.size(24.dp),
+            )
+
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = spacedBy(2.dp),
+                modifier = Modifier
+                    .padding(top = 0.dp, bottom = 4.dp),
+            ) {
+                Text(
+                    text = title,
+                    style = TraktTheme.typography.heading1,
+                    color = Color.White,
+                    maxLines = 3,
+                )
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .graphicsLayer {
+                            translationY = -10.dp.toPx()
+                        }
+                        .background(Purple500, CircleShape),
+                )
+            }
+            Text(
+                text = subtitle,
+                style = TraktTheme.typography.paragraphSmall.copy(
+                    fontSize = 14.sp,
+                ),
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                maxLines = 3,
+                modifier = Modifier.padding(horizontal = 48.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun WelcomeFooter(
+    modifier: Modifier = Modifier,
+    windowClass: WindowSizeClass,
+    onDismiss: () -> Unit = {},
+) {
+    val uriHandler = LocalUriHandler.current
+    val shape = DefaultCardShape
+
+    Column(
+        verticalArrangement = spacedBy(16.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(
+                horizontal = when {
+                    windowClass.isAtLeastMedium() -> 128.dp
+                    else -> 24.dp
+                },
+            )
+            .padding(bottom = 16.dp)
+            .shadow(4.dp, shape)
+            .clip(shape)
+            .border(width = 1.dp, color = Shade800, shape = shape)
+            .background(Purple1000)
+            .padding(
+                start = 18.dp,
+                end = 18.dp,
+                top = 16.dp,
+                bottom = 18.dp,
+            ),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = spacedBy(6.dp),
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = spacedBy(10.dp),
+                modifier = Modifier.weight(1F),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.button_text_join_trakt),
+                        style = TraktTheme.typography.heading5,
+                        color = TraktTheme.colors.textPrimary,
+                        maxLines = 1,
+                    )
+                    Icon(
+                        painter = painterResource(R.drawable.ic_trakt_icon),
+                        contentDescription = null,
+                        tint = TraktTheme.colors.textPrimary,
+                        modifier = Modifier
+                            .size(16.dp)
+                            .align(Alignment.CenterVertically),
+                    )
+                }
+                Text(
+                    text = stringResource(R.string.text_landing_hero),
+                    style = TraktTheme.typography.paragraphSmaller,
+                    color = TraktTheme.colors.textPrimary,
+                    textAlign = TextAlign.Center,
+                    maxLines = 5,
+                )
+            }
+        }
+
+        PrimaryButton(
+            text = stringResource(R.string.button_text_get_started),
+            containerColor = Purple500,
+            contentColor = Color.White,
+            onClick = onDismiss,
+            modifier = Modifier
+                .fillMaxWidth()
+                .shadow(1.dp, RoundedCornerShape(16.dp)),
+        )
+    }
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@Preview(
+    device = "id:pixel_4",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+)
+@Composable
+private fun Preview() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.Blue.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            WelcomeScreen(
+                onDismiss = {},
+            )
+        }
+    }
+}

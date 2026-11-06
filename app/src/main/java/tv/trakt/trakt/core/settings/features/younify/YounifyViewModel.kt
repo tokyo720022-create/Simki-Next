@@ -1,0 +1,437 @@
+@file:OptIn(FlowPreview::class)
+
+package tv.trakt.trakt.core.settings.features.younify
+
+import android.content.Context
+import androidx.activity.result.ActivityResultRegistry
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import timber.log.Timber
+import tv.trakt.trakt.BuildConfig
+import tv.trakt.trakt.common.auth.session.SessionManager
+import tv.trakt.trakt.common.firebase.analytics.Analytics
+import tv.trakt.trakt.common.helpers.DynamicStringResource
+import tv.trakt.trakt.common.helpers.LoadingState
+import tv.trakt.trakt.common.helpers.StaticStringResource
+import tv.trakt.trakt.common.helpers.StringResource
+import tv.trakt.trakt.common.helpers.extensions.HTTP_ERROR_TRAKT_VIP_ONLY
+import tv.trakt.trakt.common.helpers.extensions.getHttpCode
+import tv.trakt.trakt.common.helpers.extensions.recordError
+import tv.trakt.trakt.common.helpers.extensions.rethrowCancellation
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.core.settings.features.younify.model.LinkStatus
+import tv.trakt.trakt.core.settings.features.younify.model.YounifyDetails
+import tv.trakt.trakt.core.settings.features.younify.model.YounifyServices
+import tv.trakt.trakt.core.settings.features.younify.model.linkStatus
+import tv.trakt.trakt.core.settings.features.younify.usecases.GetYounifyDetailsUseCase
+import tv.trakt.trakt.core.settings.features.younify.usecases.RefreshYounifyDataUseCase
+import tv.trakt.trakt.core.settings.features.younify.usecases.RefreshYounifyTokensUseCase
+import tv.trakt.trakt.core.settings.features.younify.usecases.UnlinkYounifyServiceUseCase
+import tv.trakt.trakt.resources.R
+import tv.younify.sdk.connect.Connect
+import tv.younify.sdk.connect.ConnectOptions
+import tv.younify.sdk.connect.LogLevel
+import tv.younify.sdk.connect.LogListener
+import tv.younify.sdk.connect.RenewTokensCallback
+import tv.younify.sdk.connect.StreamingService
+import tv.younify.sdk.connect.TokenHandler
+import tv.younify.sdk.connect.UserConsentRequiredException
+
+internal class YounifyViewModel(
+    private val younify: Connect,
+    private val sessionManager: SessionManager,
+    private val getYounifyDetailsUseCase: GetYounifyDetailsUseCase,
+    private val refreshYounifyTokensUseCase: RefreshYounifyTokensUseCase,
+    private val refreshYounifyDataUseCase: RefreshYounifyDataUseCase,
+    private val unlinkYounifyServiceUseCase: UnlinkYounifyServiceUseCase,
+    private val analytics: Analytics,
+) : ViewModel() {
+    private val initialState = YounifyState()
+
+    private val userState = MutableStateFlow(initialState.user)
+    private val servicesState = MutableStateFlow(initialState.younifyServices)
+    private val freeServicesState = MutableStateFlow(initialState.freeServices)
+    private val syncDataPromptState = MutableStateFlow(initialState.syncDataPrompt)
+    private val loadingState = MutableStateFlow(initialState.loading)
+    private val infoState = MutableStateFlow(initialState.info)
+    private val errorState = MutableStateFlow(initialState.error)
+    private val logsState = MutableStateFlow(initialState.logs)
+
+    private var dataJob: Job? = null
+    private var refreshTokenJob: Job? = null
+    private var refreshDataJob: Job? = null
+
+    init {
+        loadUser()
+        loadData()
+
+        analytics.logScreenView(
+            screenName = "younify",
+        )
+    }
+
+    private fun loadUser() {
+        sessionManager.observeProfile()
+            .distinctUntilChanged()
+            .debounce(200)
+            .onEach { user ->
+                userState.update { user }
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun loadData(info: StringResource? = null) {
+        dataJob?.cancel()
+        dataJob = viewModelScope.launch {
+            loadingState.update { LoadingState.Loading }
+
+            try {
+                userState.update {
+                    sessionManager.getProfile()
+                }
+
+                val younifyDetails = getYounifyDetailsUseCase.getYounifyDetails(
+                    generateTokens = false,
+                )
+
+                connectYounify(younifyDetails)
+                loadYounifyServices(younifyDetails.services)
+
+                info?.let { info ->
+                    infoState.update { info }
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    if (error.getHttpCode() == HTTP_ERROR_TRAKT_VIP_ONLY) {
+                        errorState.update {
+                            DynamicStringResource(R.string.error_text_vip_only_feature)
+                        }
+                        return@rethrowCancellation
+                    }
+
+                    errorState.update {
+                        StaticStringResource(error.message ?: "Unknown error")
+                    }
+
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingState.update { LoadingState.Done }
+            }
+        }
+    }
+
+    private fun connectYounify(details: YounifyDetails) {
+        val options = ConnectOptions(
+            key = BuildConfig.YOUNIFY_API_KEY,
+            accessToken = details.tokens.accessToken,
+            refreshToken = details.tokens.refreshToken,
+            tokenHandler = younifyTokenHandler,
+            logLevel = when {
+                BuildConfig.DEBUG -> LogLevel.Trace
+                else -> LogLevel.Debug
+            },
+            logListener = younifyLogListener,
+            extra = null,
+        )
+        younify.configure(options)
+    }
+
+    private suspend fun loadYounifyServices(traktServices: YounifyServices) {
+        val traktServicesMap = traktServices.available.watched.associateBy { it.id }
+        val traktFreeServices = traktServices.available.watched.filter { !it.vip }.map { it.id }
+
+        val remoteServices = younify.fetchServices()
+
+        freeServicesState.update {
+            remoteServices
+                .mapNotNull {
+                    when (it.id) {
+                        in traktFreeServices -> it.id
+                        else -> null
+                    }
+                }
+                .toImmutableList()
+        }
+
+        servicesState.update {
+            remoteServices
+                .filter { it.id in traktServicesMap }
+                .sortedWith(
+                    compareByDescending<StreamingService> {
+                        it.linkStatus == LinkStatus.LINKED
+                    }.thenBy {
+                        traktServicesMap[it.id]?.vip == true
+                    }.thenBy {
+                        it.name.lowercase()
+                    },
+                )
+                .toImmutableList()
+        }
+    }
+
+    private fun linkService(
+        service: StreamingService,
+        context: Context,
+        registry: ActivityResultRegistry,
+        promptSync: Boolean,
+    ) {
+        analytics.logStreamingService("connect", service.id)
+
+        viewModelScope.launch {
+            loadingState.update { LoadingState.Loading }
+            try {
+                val resultSuccess = younify.linkService(
+                    context = context,
+                    registry = registry,
+                    service = service,
+                )
+
+                if (resultSuccess) {
+                    Timber.d("Successfully linked service ${service.name}")
+
+                    if (promptSync) {
+                        syncDataPromptState.update { service.id }
+                    } else {
+                        notifyYounifyRefresh(
+                            serviceId = service.id,
+                            syncData = false,
+                            info = DynamicStringResource(R.string.text_info_younify_service_linked),
+                        )
+                    }
+                } else {
+                    loadingState.update { LoadingState.Done }
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    loadingState.update { LoadingState.Done }
+
+                    if (error is UserConsentRequiredException) {
+                        return@rethrowCancellation
+                    }
+
+                    errorState.update {
+                        StaticStringResource(error.message ?: "Unknown error")
+                    }
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    fun notifyYounifyRefresh(
+        serviceId: String,
+        syncData: Boolean,
+        info: StringResource?,
+    ) {
+        syncDataPromptState.update { null }
+
+        if (syncData) {
+            analytics.logStreamingService("sync", serviceId)
+        }
+
+        refreshDataJob?.cancel()
+        refreshDataJob = viewModelScope.launch {
+            try {
+                refreshYounifyDataUseCase.refresh(
+                    serviceId = serviceId,
+                    skipSync = !syncData,
+                )
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+
+        loadData(info = info)
+    }
+
+    fun onServiceAction(
+        service: StreamingService,
+        context: Context,
+        registry: ActivityResultRegistry?,
+    ) {
+        if (registry == null) {
+            Timber.e("No activity registry")
+            return
+        }
+
+        when (service.linkStatus) {
+            LinkStatus.UNLINKED -> linkService(
+                service = service,
+                promptSync = true,
+                context = context,
+                registry = registry,
+            )
+
+            LinkStatus.BROKEN -> linkService(
+                service = service,
+                promptSync = false,
+                context = context,
+                registry = registry,
+            )
+
+            LinkStatus.LINKED -> Unit
+        }
+    }
+
+    fun onServiceEdit(
+        service: StreamingService,
+        context: Context,
+        registry: ActivityResultRegistry?,
+    ) {
+        if (registry == null) {
+            Timber.e("No activity registry")
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                loadingState.update { LoadingState.Loading }
+                younify.manageLinkedService(
+                    service = service,
+                    context = context,
+                    registry = registry,
+                )
+                notifyYounifyRefresh(
+                    serviceId = service.id,
+                    syncData = false,
+                    info = null,
+                )
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    loadingState.update { LoadingState.Done }
+                    errorState.update {
+                        StaticStringResource(error.message ?: "Unknown error")
+                    }
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    fun onServiceUnlink(service: StreamingService) {
+        analytics.logStreamingService("unlink", service.id)
+
+        viewModelScope.launch {
+            try {
+                loadingState.update { LoadingState.Loading }
+
+                unlinkYounifyServiceUseCase.unlinkService(service.id)
+
+                loadData(
+                    info = DynamicStringResource(R.string.text_info_younify_service_unlinked),
+                )
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    loadingState.update { LoadingState.Loading }
+                    errorState.update {
+                        StaticStringResource(error.message ?: "Unknown error")
+                    }
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    fun clearInfo() {
+        infoState.update { null }
+    }
+
+    override fun onCleared() {
+        dataJob?.cancel()
+        refreshTokenJob?.cancel()
+        refreshDataJob?.cancel()
+        super.onCleared()
+    }
+
+    private val younifyTokenHandler = object : TokenHandler {
+        override fun renewTokens(
+            expiredAccessToken: String?,
+            refreshToken: String?,
+            callback: RenewTokensCallback,
+        ) {
+            refreshTokenJob?.cancel()
+            refreshTokenJob = viewModelScope.launch {
+                try {
+                    refreshYounifyTokensUseCase.refreshTokens()
+                        .apply {
+                            callback.complete(
+                                newAccessToken = tokens.accessToken,
+                                newRefreshToken = tokens.refreshToken,
+                            )
+                        }
+                } catch (error: Exception) {
+                    error.rethrowCancellation {
+                        Timber.recordError(error)
+                    }
+                }
+            }
+        }
+
+        override fun renewedTokens(
+            newAccessToken: String,
+            newRefreshToken: String,
+        ) = Unit
+    }
+
+    private val younifyLogListener = object : LogListener {
+        override fun log(
+            level: LogLevel,
+            message: String,
+        ) {
+            logsState.update { it.plus(message) }
+            Timber.log(level.value, "Younify: $message")
+        }
+    }
+
+    private var isVipUpsellSeenLogged = false
+
+    fun onVipUpsellSeen() {
+        if (isVipUpsellSeenLogged) return
+        isVipUpsellSeenLogged = true
+        analytics.vip.logUpsellImpression("connected-apps")
+    }
+
+    val state = combine(
+        userState,
+        servicesState,
+        freeServicesState,
+        syncDataPromptState,
+        loadingState,
+        infoState,
+        errorState,
+        logsState,
+    ) { state ->
+        @Suppress("UNCHECKED_CAST")
+        YounifyState(
+            user = state[0] as User?,
+            younifyServices = state[1] as ImmutableList<StreamingService>?,
+            freeServices = state[2] as ImmutableList<String>?,
+            syncDataPrompt = state[3] as String?,
+            loading = state[4] as LoadingState,
+            info = state[5] as StringResource?,
+            error = state[6] as StringResource?,
+            logs = state[7] as List<String>,
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = initialState,
+    )
+}

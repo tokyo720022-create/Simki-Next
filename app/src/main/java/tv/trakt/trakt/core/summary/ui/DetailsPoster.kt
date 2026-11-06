@@ -1,0 +1,170 @@
+package tv.trakt.trakt.core.summary.ui
+
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.shadow.Shadow
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.dp
+import coil3.ColorImage
+import coil3.annotation.ExperimentalCoilApi
+import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePreviewHandler
+import coil3.compose.LocalAsyncImagePreviewHandler
+import coil3.request.ImageRequest
+import coil3.request.crossfade
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.theme.TraktTheme
+import tv.trakt.trakt.ui.theme.VerticalImageAspectRatio
+
+private val cardShape = RoundedCornerShape(24.dp)
+
+@Composable
+internal fun DetailsPoster(
+    modifier: Modifier = Modifier,
+    imageUrl: String?,
+    imagePlaceholderUrl: String?,
+    imageAlpha: Float = 1F,
+    imageOffsetY: Dp = 0.dp,
+    color: Color? = null,
+) {
+    var isError by remember(imageUrl) { mutableStateOf(false) }
+
+    Box(
+        modifier = modifier
+            .aspectRatio(VerticalImageAspectRatio),
+    ) {
+        if (imageUrl != null && !isError) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(imageUrl)
+                    .placeholderMemoryCacheKey(imagePlaceholderUrl)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                onError = { isError = true },
+                modifier = Modifier
+                    .dropShadow(
+                        shape = cardShape,
+                        shadow = Shadow(
+                            radius = 46.dp,
+                            spread = 8.dp,
+                            offset = DpOffset(0.dp, 12.dp),
+                            color = color?.copy(alpha = 0.27F) ?: Color.Transparent,
+                        ),
+                    )
+                    .graphicsLayer {
+                        translationY = imageOffsetY.toPx()
+                    }
+                    .alpha(imageAlpha)
+                    .fillMaxSize()
+                    .clip(cardShape),
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .shadow(
+                        elevation = 6.dp,
+                        shape = cardShape,
+                    )
+                    .graphicsLayer {
+                        translationY = imageOffsetY.toPx()
+                    }
+                    .alpha(imageAlpha)
+                    .fillMaxSize()
+                    .clip(cardShape)
+                    .background(color = TraktTheme.colors.placeholderContainer),
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.ic_trakt_icon),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    colorFilter = ColorFilter.tint(TraktTheme.colors.placeholderContent),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(80.dp)
+                        .align(Alignment.Center),
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@Preview(
+    device = "id:pixel_5",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+    locale = "us",
+)
+@Composable
+private fun Preview() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.Blue.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            Box(
+                modifier = Modifier.padding(64.dp),
+            ) {
+                DetailsPoster(
+                    imageUrl = "https://trakt.tv/assets/placeholders/thumb/fanart-96d5731216f272365311029c1d1a9388.png",
+                    imagePlaceholderUrl = null,
+                    color = Color.White,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@Preview(
+    device = "id:pixel_5",
+    showBackground = true,
+    backgroundColor = 0xFFFFFFFF,
+    locale = "us",
+)
+@Composable
+private fun Preview2() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.Blue.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            Box(
+                modifier = Modifier.padding(64.dp),
+            ) {
+                DetailsPoster(
+                    imageUrl = null,
+                    imagePlaceholderUrl = null,
+                )
+            }
+        }
+    }
+}

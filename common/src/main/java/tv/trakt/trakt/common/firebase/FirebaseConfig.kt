@@ -1,0 +1,25 @@
+package tv.trakt.trakt.common.firebase
+
+class FirebaseConfig {
+    companion object RemoteKey {
+        const val MOBILE_BACKGROUND_IMAGE_URL = "mobile_background_image_url"
+        const val MOBILE_BACKGROUND_VIP_IMAGE_URL = "mobile_background_vip_image_url"
+        const val MOBILE_THIS_MONTH_IMAGE_URL = "mobile_this_month_image_url"
+        const val MOBILE_EMPTY_IMAGE_1 = "mobile_empty_image_1"
+        const val MOBILE_EMPTY_IMAGE_2 = "mobile_empty_image_2"
+        const val MOBILE_EMPTY_IMAGE_3 = "mobile_empty_image_3"
+        const val MOBILE_EMPTY_IMAGE_4 = "mobile_empty_image_4"
+        const val MOBILE_EMPTY_IMAGE_5 = "mobile_empty_image_5"
+        const val MOBILE_WHATS_NEW = "mobile_whats_new"
+        const val MOBILE_WELCOME_BANNER_ENABLED = "mobile_welcome_banner_enabled"
+        const val MOBILE_HTTPS_AUTH_CALLBACK_ENABLED = "mobile_https_auth_callback_enabled_2"
+
+        const val YIR_2026_BANNER_ENABLED = "yir_2026_banner_enabled"
+        const val YIR_2026_URL = "yir_2026_url"
+
+        const val BACKGROUND_IMAGE_URL = "background_image_url"
+        const val PLEX_PLAY_ENABLED = "plex_play_enabled"
+        const val SEASONAL_THEME = "mobile_seasonal_theme"
+        const val STAR_WARS_SABER = "star_wars_saber"
+    }
+}

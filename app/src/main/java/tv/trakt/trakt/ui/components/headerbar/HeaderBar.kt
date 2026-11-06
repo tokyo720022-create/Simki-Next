@@ -1,0 +1,329 @@
+package tv.trakt.trakt.ui.components.headerbar
+
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.launch
+import org.koin.compose.koinInject
+import tv.trakt.trakt.LocalStartAuthorization
+import tv.trakt.trakt.common.model.MediaMode
+import tv.trakt.trakt.common.model.globalfilter.GlobalFilter
+import tv.trakt.trakt.common.ui.theme.colors.HalloweenDarkColors
+import tv.trakt.trakt.core.auth.model.LoginSource
+import tv.trakt.trakt.core.filters.data.GlobalFilterManager
+import tv.trakt.trakt.core.settings.usecases.SeasonalThemeUseCase
+import tv.trakt.trakt.core.today.pill.TodayPillContent
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.MediaFilterIcon
+import tv.trakt.trakt.ui.components.MediaModeButtons
+import tv.trakt.trakt.ui.components.buttons.TertiaryButton
+import tv.trakt.trakt.ui.components.seasonal.SeasonalThemeIcon
+import tv.trakt.trakt.ui.components.vip.VipChip
+import tv.trakt.trakt.ui.components.vip.onUpsellSeen
+import tv.trakt.trakt.ui.components.whatsnew.WhatsNewIcon
+import tv.trakt.trakt.ui.theme.LocalSeasonalTheme
+import tv.trakt.trakt.ui.theme.TraktTheme
+import tv.trakt.trakt.ui.theme.model.SeasonalTheme
+
+@Composable
+internal fun HeaderBar(
+    modifier: Modifier = Modifier,
+    containerColor: Color = TraktTheme.colors.navigationHeaderContainer,
+    containerAlpha: Float = 0.98F,
+    showFilters: Boolean = false,
+    showLogin: Boolean = false,
+    showVip: Boolean = false,
+    showWhatsNew: Boolean = false,
+    userLoading: Boolean = false,
+    todayContent: (@Composable () -> Unit)? = null,
+    actions: (@Composable () -> Unit)? = null,
+    onVipSeen: (() -> Unit)? = null,
+    onVipClick: () -> Unit = {},
+    onFilterClick: () -> Unit = {},
+    onWhatsNewClick: () -> Unit = {},
+) {
+    if (LocalInspectionMode.current) {
+        HeaderBar(
+            modifier = modifier,
+            containerColor = containerColor,
+            containerAlpha = containerAlpha,
+            filter = GlobalFilter.Default,
+            showLogin = showLogin,
+            showVip = showVip,
+            showFilters = showFilters,
+            showWhatsNew = showWhatsNew,
+            userLoading = userLoading,
+            todayContent = todayContent,
+            actions = actions,
+        )
+        return
+    }
+
+    val scope = rememberCoroutineScope()
+
+    val filterManager: GlobalFilterManager = koinInject()
+    val currentFilter = filterManager
+        .observeFilter()
+        .collectAsStateWithLifecycle(filterManager.getFilter())
+
+    val seasonalThemeUseCase: SeasonalThemeUseCase = koinInject()
+    val season = remember { seasonalThemeUseCase.currentSeason() }
+    val seasonEnabled = LocalSeasonalTheme.current != null
+
+    HeaderBar(
+        modifier = modifier,
+        containerColor = containerColor,
+        containerAlpha = containerAlpha,
+        filter = currentFilter.value,
+        showLogin = showLogin,
+        showVip = showVip,
+        showFilters = showFilters,
+        showWhatsNew = showWhatsNew,
+        season = season,
+        seasonEnabled = seasonEnabled,
+        userLoading = userLoading,
+        todayContent = todayContent,
+        actions = actions,
+        onVipSeen = onVipSeen,
+        onVipClick = onVipClick,
+        onFilterClick = onFilterClick,
+        onWhatsNewClick = onWhatsNewClick,
+        onSeasonClick = {
+            season?.let {
+                scope.launch {
+                    seasonalThemeUseCase.setEnabled(it, !seasonEnabled)
+                }
+            }
+        },
+        onMediaModeSelect = { mode ->
+            scope.launch {
+                filterManager.setFilter(currentFilter.value.copy(mode = mode))
+            }
+        },
+    )
+}
+
+@Composable
+private fun HeaderBar(
+    modifier: Modifier = Modifier,
+    containerColor: Color = TraktTheme.colors.navigationHeaderContainer,
+    containerAlpha: Float = 0.98F,
+    filter: GlobalFilter,
+    showLogin: Boolean = false,
+    showVip: Boolean = false,
+    showFilters: Boolean = false,
+    showWhatsNew: Boolean = false,
+    season: SeasonalTheme? = null,
+    seasonEnabled: Boolean = false,
+    userLoading: Boolean = false,
+    todayContent: (@Composable () -> Unit)? = null,
+    actions: (@Composable () -> Unit)? = null,
+    onMediaModeSelect: (MediaMode) -> Unit = {},
+    onVipSeen: (() -> Unit)? = null,
+    onVipClick: () -> Unit = {},
+    onFilterClick: () -> Unit = {},
+    onWhatsNewClick: () -> Unit = {},
+    onSeasonClick: () -> Unit = {},
+) {
+    val startAuthorization = LocalStartAuthorization.current
+
+    val contentHeight = 36.dp
+    val headerBarHeight = WindowInsets.statusBars.asPaddingValues()
+        .calculateTopPadding()
+        .plus(TraktTheme.size.navigationHeaderHeight)
+
+    val animatedContainerAlpha by animateFloatAsState(
+        targetValue = containerAlpha,
+        animationSpec = tween(),
+    )
+
+    Box(
+        modifier = modifier
+            .height(headerBarHeight)
+            .clip(
+                RoundedCornerShape(
+                    bottomStart = 24.dp,
+                    bottomEnd = 24.dp,
+                ),
+            )
+            .background(containerColor.copy(alpha = animatedContainerAlpha)),
+    ) {
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(
+                    start = TraktTheme.spacing.mainPageHorizontalSpace,
+                    end = TraktTheme.spacing.mainPageHorizontalSpace,
+                    bottom = TraktTheme.spacing.mainPageHorizontalSpace,
+                )
+                .sizeIn(minHeight = contentHeight),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            if (!showLogin) {
+                MediaModeButtons(
+                    mode = filter.mode,
+                    height = contentHeight,
+                    onModeSelect = onMediaModeSelect,
+                )
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                if (showLogin) {
+                    TertiaryButton(
+                        text = stringResource(R.string.button_text_login),
+                        icon = painterResource(R.drawable.ic_trakt_icon),
+                        height = contentHeight,
+                        loading = userLoading,
+                        enabled = !userLoading,
+                        onClick = { startAuthorization(LoginSource.HeaderBar) },
+                    )
+                } else if (showVip) {
+                    VipChip(
+                        modifier = onVipSeen?.let { Modifier.onUpsellSeen(it) } ?: Modifier,
+                        onClick = onVipClick,
+                    )
+                }
+
+                todayContent?.invoke()
+
+                if (season != null && showFilters) {
+                    SeasonalThemeIcon(
+                        season = season,
+                        enabled = seasonEnabled,
+                        onClick = onSeasonClick,
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
+                }
+
+                if (showWhatsNew) {
+                    WhatsNewIcon(
+                        onClick = onWhatsNewClick,
+                    )
+                }
+
+                if (showFilters) {
+                    MediaFilterIcon(
+                        active = filter.isActive,
+                        onClick = onFilterClick,
+                    )
+                }
+
+                actions?.invoke()
+            }
+        }
+    }
+}
+
+@Preview(widthDp = 400)
+@Composable
+private fun Preview() {
+    TraktTheme {
+        HeaderBar(
+            filter = GlobalFilter.Default,
+            showVip = true,
+        )
+    }
+}
+
+@Preview(widthDp = 400)
+@Composable
+private fun Preview2() {
+    TraktTheme {
+        HeaderBar(
+            showLogin = true,
+            filter = GlobalFilter.Default,
+        )
+    }
+}
+
+@Preview(widthDp = 400)
+@Composable
+private fun Preview4() {
+    TraktTheme {
+        HeaderBar(
+            filter = GlobalFilter.Default.copy(
+                hideWatched = true,
+            ),
+            showVip = true,
+            showFilters = true,
+            showWhatsNew = false,
+        )
+    }
+}
+
+@Preview(widthDp = 400)
+@Composable
+private fun Preview5() {
+    TraktTheme(colors = HalloweenDarkColors) {
+        HeaderBar(
+            filter = GlobalFilter.Default,
+            showVip = true,
+            showFilters = true,
+            season = SeasonalTheme.Halloween,
+            seasonEnabled = true,
+        )
+    }
+}
+
+@Preview(widthDp = 400)
+@Composable
+private fun Preview6() {
+    TraktTheme {
+        HeaderBar(
+            filter = GlobalFilter.Default,
+            showVip = true,
+            showFilters = true,
+            season = SeasonalTheme.Halloween,
+            seasonEnabled = false,
+        )
+    }
+}
+
+@Preview(widthDp = 400)
+@Composable
+private fun PreviewToday() {
+    TraktTheme {
+        HeaderBar(
+            filter = GlobalFilter.Default,
+            showFilters = true,
+            todayContent = {
+                TodayPillContent(
+                    posters = persistentListOf("a", "b"),
+                    unseenCount = 7,
+                    onClick = {},
+                )
+            },
+        )
+    }
+}

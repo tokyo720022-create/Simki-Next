@@ -1,0 +1,61 @@
+package tv.trakt.trakt.core.lists.sections.smart.usecases
+
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
+import tv.trakt.trakt.common.data.local.ListsSmartLocalSource
+import tv.trakt.trakt.common.data.remote.UserSmartListsRemoteSource
+import tv.trakt.trakt.common.helpers.extensions.asyncMap
+import tv.trakt.trakt.common.model.Images
+import tv.trakt.trakt.common.model.lists.SmartList
+import tv.trakt.trakt.common.model.lists.SmartListSource
+import tv.trakt.trakt.common.model.lists.SmartListSource.Unknown
+import tv.trakt.trakt.common.model.pagination.Pagination
+
+private val supportedSources = SmartListSource.entries
+    .filter { it != Unknown }
+    .map { it.value }
+
+internal class GetSmartListsUseCase(
+    private val remoteSource: UserSmartListsRemoteSource,
+    private val localSource: ListsSmartLocalSource,
+) {
+    suspend fun getLocalSmartLists(pagination: Pagination? = null): ImmutableList<SmartList> {
+        return localSource.getLists()
+            .take(pagination?.limit ?: Int.MAX_VALUE)
+            .toImmutableList()
+    }
+
+    suspend fun getSmartLists(pagination: Pagination? = null): ImmutableList<SmartList> {
+        return remoteSource.getSmartLists()
+            .filter { it.source in supportedSources }
+            .take(pagination?.limit ?: Int.MAX_VALUE)
+            .asyncMap {
+                SmartList.fromDto(it)
+            }
+            .asyncMap {
+                // Fetch the first 8 items of the smart list to get their images and fill the list.
+                it.copy(
+                    images = Images(
+                        posters = remoteSource.getSmartListItems(
+                            listId = it.ids.trakt,
+                            pagination = Pagination(
+                                page = 1,
+                                limit = 8,
+                            ),
+                            extended = "images",
+                        ).mapNotNull { item ->
+                            when {
+                                item.show != null -> item.show?.images?.poster?.firstOrNull()
+                                item.movie != null -> item.movie?.images?.poster?.firstOrNull()
+                                else -> null
+                            }
+                        }.toImmutableList(),
+                    ),
+                )
+            }
+            .toImmutableList()
+            .also {
+                localSource.setLists(it)
+            }
+    }
+}

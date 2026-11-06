@@ -1,0 +1,72 @@
+package tv.trakt.trakt.core.discover.sections.all.usecases
+
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
+import tv.trakt.trakt.common.model.discover.DiscoverItem
+import tv.trakt.trakt.common.model.discover.DiscoverSection
+import tv.trakt.trakt.common.model.discover.DiscoverSection.Anticipated
+import tv.trakt.trakt.common.model.discover.DiscoverSection.Popular
+import tv.trakt.trakt.common.model.discover.DiscoverSection.Recommended
+import tv.trakt.trakt.common.model.discover.DiscoverSection.Trending
+import tv.trakt.trakt.common.model.globalfilter.GlobalFilter
+import tv.trakt.trakt.common.model.recommended.RecommendedItem
+import tv.trakt.trakt.core.discover.DiscoverConfig.DEFAULT_ALL_LIMIT
+import tv.trakt.trakt.core.discover.sections.anticipated.usecases.GetAnticipatedShowsUseCase
+import tv.trakt.trakt.core.discover.sections.popular.usecases.GetPopularShowsUseCase
+import tv.trakt.trakt.core.discover.sections.trending.usecases.GetTrendingShowsUseCase
+import tv.trakt.trakt.core.home.sections.recommended.usecase.GetRecommendedShowsUseCase
+
+internal class GetAllDiscoverShowsUseCase(
+    private val getTrendingShowsUseCase: GetTrendingShowsUseCase,
+    private val getAnticipatedShowsUseCase: GetAnticipatedShowsUseCase,
+    private val getPopularShowsUseCase: GetPopularShowsUseCase,
+    private val getRecommendedShowsUseCase: GetRecommendedShowsUseCase,
+) {
+    suspend fun getShows(
+        source: DiscoverSection,
+        page: Int = 1,
+        skipLocal: Boolean = false,
+        filters: GlobalFilter,
+    ): ImmutableList<DiscoverItem> {
+        return when (source) {
+            Trending -> getTrendingShowsUseCase.getShows(
+                page = page,
+                limit = DEFAULT_ALL_LIMIT,
+                skipLocal = skipLocal,
+                filters = filters,
+            )
+
+            Anticipated -> getAnticipatedShowsUseCase.getShows(
+                page = page,
+                limit = DEFAULT_ALL_LIMIT,
+                skipLocal = skipLocal,
+                filters = filters,
+            )
+
+            Popular -> getPopularShowsUseCase.getShows(
+                page = page,
+                limit = DEFAULT_ALL_LIMIT,
+                skipLocal = skipLocal,
+                filters = filters,
+            )
+
+            Recommended -> getRecommendedShowsUseCase.getShows(
+                limit = DEFAULT_ALL_LIMIT,
+                skipLocal = skipLocal,
+                filters = filters,
+            ).toDiscoverItems()
+        }
+    }
+
+    suspend fun getLocalShows(source: DiscoverSection): ImmutableList<DiscoverItem> {
+        return when (source) {
+            Trending -> getTrendingShowsUseCase.getLocalShows()
+            Anticipated -> getAnticipatedShowsUseCase.getLocalShows()
+            Popular -> getPopularShowsUseCase.getLocalShows()
+            Recommended -> getRecommendedShowsUseCase.getLocalShows().toDiscoverItems()
+        }
+    }
+}
+
+private fun List<RecommendedItem.ShowItem>.toDiscoverItems(): ImmutableList<DiscoverItem> =
+    map { DiscoverItem.ShowItem(show = it.show, sources = it.sources) }.toImmutableList()

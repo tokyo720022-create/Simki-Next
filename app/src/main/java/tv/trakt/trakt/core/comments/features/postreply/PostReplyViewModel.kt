@@ -1,0 +1,155 @@
+package tv.trakt.trakt.core.comments.features.postreply
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import timber.log.Timber
+import tv.trakt.trakt.common.auth.session.SessionManager
+import tv.trakt.trakt.common.firebase.analytics.Analytics
+import tv.trakt.trakt.common.helpers.LoadingState
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.LoadingState.Loading
+import tv.trakt.trakt.common.helpers.extensions.recordError
+import tv.trakt.trakt.common.helpers.extensions.rethrowCancellation
+import tv.trakt.trakt.common.model.Comment
+import tv.trakt.trakt.common.model.CommentGif
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.common.model.toTraktId
+import tv.trakt.trakt.core.comments.helpers.commentAnalyticsContent
+import tv.trakt.trakt.core.comments.model.CommentMention
+import tv.trakt.trakt.core.comments.model.MentionSource
+import tv.trakt.trakt.core.comments.usecases.GetCommentMentionsUseCase
+import tv.trakt.trakt.core.comments.usecases.PostReplyUseCase
+import kotlin.time.Duration.Companion.seconds
+
+@Suppress("UNCHECKED_CAST")
+internal class PostReplyViewModel(
+    private val comment: Comment,
+    private val commentUser: User?,
+    private val sessionManager: SessionManager,
+    private val postReplyUseCase: PostReplyUseCase,
+    private val mentionSource: MentionSource?,
+    private val getCommentMentionsUseCase: GetCommentMentionsUseCase,
+    private val analytics: Analytics,
+) : ViewModel() {
+    private val initialState = PostReplyState()
+
+    private val loadingState = MutableStateFlow(initialState.loading)
+    private val userState = MutableStateFlow(initialState.user)
+    private val commentUserState = MutableStateFlow(commentUser ?: comment.user)
+    private val resultState = MutableStateFlow(initialState.result)
+    private val errorState = MutableStateFlow(initialState.error)
+    private val mentionsState = MutableStateFlow(initialState.mentions)
+
+    private var job: Job? = null
+
+    init {
+        loadUser()
+        loadMentions()
+    }
+
+    private fun loadUser() {
+        viewModelScope.launch {
+            try {
+                userState.update {
+                    sessionManager.getProfile()
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    private fun loadMentions() {
+        val source = mentionSource ?: return
+        viewModelScope.launch {
+            try {
+                mentionsState.update {
+                    getCommentMentionsUseCase.getMentions(source)
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    fun submitReply(
+        reply: String,
+        spoiler: Boolean,
+        gif: CommentGif?,
+    ) {
+        if (job?.isActive == true) {
+            return
+        }
+        job = viewModelScope.launch {
+            try {
+                loadingState.update { Loading }
+                delay(1.seconds)
+                resultState.update {
+                    postReplyUseCase.postReply(
+                        commentId = comment.id.toTraktId(),
+                        text = reply,
+                        spoiler = spoiler,
+                        gif = gif,
+                    )
+                }
+
+                analytics.comments.logReplyAdd(
+                    content = commentAnalyticsContent(reply, gif),
+                )
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    loadingState.update { Done }
+                    Timber.recordError(error)
+                }
+            } finally {
+                job = null
+            }
+        }
+    }
+
+    fun clearError() {
+        errorState.update { null }
+    }
+
+    override fun onCleared() {
+        job?.cancel()
+        job = null
+        super.onCleared()
+    }
+
+    val state = combine(
+        loadingState,
+        userState,
+        commentUserState,
+        resultState,
+        errorState,
+        mentionsState,
+    ) { state ->
+        PostReplyState(
+            loading = state[0] as LoadingState,
+            user = state[1] as User?,
+            commentUser = state[2] as User?,
+            result = state[3] as Comment?,
+            error = state[4] as Exception?,
+            mentions = state[5] as ImmutableList<CommentMention>,
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = initialState,
+    )
+}

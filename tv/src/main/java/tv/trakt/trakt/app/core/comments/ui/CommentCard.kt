@@ -1,0 +1,376 @@
+package tv.trakt.trakt.app.core.comments.ui
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontWeight.Companion.W700
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.tv.material3.Border
+import androidx.tv.material3.Card
+import androidx.tv.material3.CardDefaults
+import androidx.tv.material3.Icon
+import androidx.tv.material3.Text
+import coil3.ColorImage
+import coil3.annotation.ExperimentalCoilApi
+import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePreviewHandler
+import coil3.compose.LocalAsyncImagePreviewHandler
+import tv.trakt.trakt.app.ui.theme.TraktTheme
+import tv.trakt.trakt.common.helpers.extensions.capitalize
+import tv.trakt.trakt.common.helpers.extensions.mediumDateFormat
+import tv.trakt.trakt.common.helpers.extensions.toLocal
+import tv.trakt.trakt.common.helpers.extensions.toMarkdownText
+import tv.trakt.trakt.common.helpers.preview.PreviewData
+import tv.trakt.trakt.common.model.Comment
+import tv.trakt.trakt.common.model.CommentGif
+import tv.trakt.trakt.common.model.CommentUserProgress
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.resources.R
+
+@Composable
+internal fun CommentCard(
+    comment: Comment,
+    modifier: Modifier = Modifier,
+    user: User? = null,
+    progressTotal: Int? = null,
+    onClick: () -> Unit,
+) {
+    val progress = remember(user, comment, progressTotal) {
+        comment.userStats.progress(progressTotal)
+            .takeIf { comment.user.ids.trakt != user?.ids?.trakt }
+    }
+
+    Card(
+        onClick = onClick,
+        modifier = modifier,
+        shape = CardDefaults.shape(
+            shape = RoundedCornerShape(12.dp),
+        ),
+        border = CardDefaults.border(
+            focusedBorder = Border(
+                border = BorderStroke(
+                    width = (2.75).dp,
+                    color = TraktTheme.colors.accent,
+                ),
+                shape = RoundedCornerShape(12.dp),
+            ),
+        ),
+        colors = CardDefaults.colors(
+            containerColor = TraktTheme.colors.commentContainer,
+            focusedContainerColor = TraktTheme.colors.commentContainer,
+        ),
+        scale = CardDefaults.scale(
+            focusedScale = 1.02f,
+        ),
+        content = {
+            CommentCardContent(
+                comment = comment,
+                progress = progress,
+            )
+        },
+    )
+}
+
+@Composable
+private fun CommentCardContent(
+    comment: Comment,
+    progress: CommentUserProgress?,
+) {
+    Column(
+        verticalArrangement = spacedBy(0.dp, Alignment.CenterVertically),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(vertical = 16.dp),
+    ) {
+        CommentHeader(
+            comment = comment,
+            progress = progress,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+
+        val markdownText = remember(comment.commentNoSpoilers) {
+            comment.commentNoSpoilers.toMarkdownText()
+        }
+
+        val body = @Composable { modifier: Modifier ->
+            Text(
+                text = markdownText,
+                style = TraktTheme.typography.paragraphSmall,
+                color = TraktTheme.colors.textSecondary,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = modifier.then(
+                    if (comment.hasSpoilers) Modifier.blur(4.dp) else Modifier,
+                ),
+            )
+        }
+
+        val gif = comment.gif
+        val gifOnly = gif != null && comment.commentNoSpoilers.isBlank()
+        when {
+            gif == null -> {
+                body(Modifier.padding(16.dp))
+                Spacer(modifier = Modifier.weight(1F))
+            }
+            gifOnly -> {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .weight(1F)
+                        .fillMaxWidth(),
+                ) {
+                    CommentGifView(
+                        gif = gif,
+                        shape = SideGifShape,
+                        blurred = comment.hasSpoilers,
+                        modifier = Modifier
+                            .padding(horizontal = 16.dp)
+                            .padding(top = 12.dp, bottom = 16.dp),
+                    )
+                }
+            }
+            else -> {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = spacedBy(12.dp),
+                    modifier = Modifier.padding(16.dp),
+                ) {
+                    body(Modifier.weight(1F))
+                    CommentGifView(
+                        gif = gif,
+                        shape = SideGifShape,
+                        blurred = comment.hasSpoilers,
+                        modifier = Modifier.sizeIn(
+                            maxWidth = SideGifMaxSize.width,
+                            maxHeight = SideGifMaxSize.height,
+                        ),
+                    )
+                }
+                Spacer(modifier = Modifier.weight(1F))
+            }
+        }
+
+        CommentFooter(
+            comment = comment,
+            modifier = Modifier
+                .padding(horizontal = 16.dp),
+        )
+    }
+}
+
+@Composable
+private fun CommentHeader(
+    comment: Comment,
+    progress: CommentUserProgress?,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = spacedBy(8.dp),
+        modifier = modifier,
+    ) {
+        Box(
+            modifier = Modifier.size(36.dp),
+        ) {
+            val avatarBorder = when {
+                comment.user.isAnyVip -> TraktTheme.colors.vipAccent
+                else -> Color.Transparent
+            }
+            val avatar = comment.user.images?.avatar?.full
+            if (avatar != null) {
+                AsyncImage(
+                    model = avatar,
+                    contentDescription = "User avatar",
+                    contentScale = ContentScale.Crop,
+                    error = painterResource(R.drawable.ic_person_placeholder),
+                    modifier = Modifier
+                        .border(2.5.dp, avatarBorder, CircleShape)
+                        .clip(CircleShape),
+                )
+            } else {
+                Image(
+                    painter = painterResource(R.drawable.ic_person_placeholder),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .border(2.5.dp, avatarBorder, CircleShape)
+                        .clip(CircleShape),
+                )
+            }
+        }
+
+        Column(verticalArrangement = spacedBy(1.dp)) {
+            Row(
+                horizontalArrangement = spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = comment.user.displayName,
+                    style = TraktTheme.typography.paragraph.copy(fontWeight = FontWeight.W600),
+                    color = TraktTheme.colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            val dateFormat = mediumDateFormat()
+            Text(
+                text = remember(comment.createdAt) {
+                    comment.createdAt.toLocal().format(dateFormat).capitalize()
+                },
+                style = TraktTheme.typography.paragraphSmall,
+                color = TraktTheme.colors.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        if (progress != null || comment.user5Rating != null) {
+            Spacer(modifier = Modifier.weight(1F))
+            CommentUserChips(
+                comment = comment,
+                progress = progress,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CommentFooter(
+    comment: Comment,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = spacedBy(16.dp),
+        modifier = modifier,
+    ) {
+        Row(
+            horizontalArrangement = spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_comment),
+                contentDescription = "Replies",
+                tint = TraktTheme.colors.textSecondary,
+                modifier = Modifier.size(18.dp),
+            )
+            Text(
+                text = stringResource(R.string.button_text_comment_replies, comment.replies).uppercase(),
+                style = TraktTheme.typography.paragraphSmall.copy(fontWeight = W700),
+                color = TraktTheme.colors.textSecondary,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@Preview
+@Composable
+fun CommentPreview() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.LightGray.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            Column(
+                verticalArrangement = spacedBy(32.dp),
+            ) {
+                CommentCard(
+                    onClick = {},
+                    comment = PreviewData.comment1.copy(userRating = 1),
+                    modifier = Modifier
+                        .height(TraktTheme.size.detailsCommentSize)
+                        .aspectRatio(CardDefaults.HorizontalImageAspectRatio),
+                )
+                CommentCard(
+                    onClick = {},
+                    comment = PreviewData.comment1.copy(userRating = 10),
+                    modifier = Modifier
+                        .height(TraktTheme.size.detailsCommentSize)
+                        .aspectRatio(CardDefaults.HorizontalImageAspectRatio),
+                )
+
+                CommentCard(
+                    onClick = {},
+                    comment = PreviewData.comment1.copy(userRating = 7),
+                    progressTotal = 10,
+                    modifier = Modifier
+                        .height(TraktTheme.size.detailsCommentSize)
+                        .aspectRatio(CardDefaults.HorizontalImageAspectRatio),
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@Preview
+@Composable
+fun CommentGifPreview() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.LightGray.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            Column(
+                verticalArrangement = spacedBy(32.dp),
+            ) {
+                CommentCard(
+                    onClick = {},
+                    comment = PreviewData.comment1.copy(gif = PreviewGif),
+                    modifier = Modifier
+                        .height(TraktTheme.size.detailsCommentSize)
+                        .aspectRatio(CardDefaults.HorizontalImageAspectRatio),
+                )
+                CommentCard(
+                    onClick = {},
+                    comment = PreviewData.comment1.copy(comment = "", gif = PreviewGif),
+                    modifier = Modifier
+                        .height(TraktTheme.size.detailsCommentSize)
+                        .aspectRatio(CardDefaults.HorizontalImageAspectRatio),
+                )
+                CommentCard(
+                    onClick = {},
+                    comment = PreviewData.comment1.copy(isSpoiler = true, gif = PreviewGif),
+                    modifier = Modifier
+                        .height(TraktTheme.size.detailsCommentSize)
+                        .aspectRatio(CardDefaults.HorizontalImageAspectRatio),
+                )
+            }
+        }
+    }
+}
+
+private val PreviewGif = CommentGif(
+    slug = "funny-cat",
+    url = "https://example.com/preview.gif",
+)

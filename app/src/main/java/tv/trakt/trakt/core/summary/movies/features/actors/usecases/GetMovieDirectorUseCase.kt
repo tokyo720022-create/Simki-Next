@@ -1,0 +1,22 @@
+package tv.trakt.trakt.core.summary.movies.features.actors.usecases
+
+import tv.trakt.trakt.common.data.local.PeopleLocalSource
+import tv.trakt.trakt.common.data.remote.MoviesRemoteSource
+import tv.trakt.trakt.common.model.Person
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.fromDto
+
+internal class GetMovieDirectorUseCase(
+    private val remoteSource: MoviesRemoteSource,
+    private val peopleLocalSource: PeopleLocalSource,
+) {
+    suspend fun getDirector(movieId: TraktId): Person {
+        return remoteSource.getCastCrew(movieId).crew
+            ?.get("directing")
+            ?.firstOrNull { it.job.equals("director", ignoreCase = true) }
+            ?.let { Person.fromDto(it.person) }
+            ?.also {
+                peopleLocalSource.upsertPeople(listOf(it))
+            } ?: Person.Unknown
+    }
+}

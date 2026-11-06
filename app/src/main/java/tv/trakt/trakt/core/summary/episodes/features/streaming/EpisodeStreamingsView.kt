@@ -1,0 +1,269 @@
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+
+package tv.trakt.trakt.core.summary.episodes.features.streaming
+
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Alignment.Companion.CenterVertically
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.ColorImage
+import coil3.annotation.ExperimentalCoilApi
+import coil3.compose.AsyncImagePreviewHandler
+import coil3.compose.LocalAsyncImagePreviewHandler
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.LoadingState.Idle
+import tv.trakt.trakt.common.helpers.LoadingState.Loading
+import tv.trakt.trakt.common.helpers.extensions.onClick
+import tv.trakt.trakt.common.helpers.extensions.openExternalAppLink
+import tv.trakt.trakt.common.helpers.streamingservices.StreamingServiceApp
+import tv.trakt.trakt.common.model.streamings.StreamingService
+import tv.trakt.trakt.common.model.streamings.StreamingType
+import tv.trakt.trakt.core.streamings.ui.JustWatchRanksStrip
+import tv.trakt.trakt.core.summary.ui.views.DetailsStreamingItem
+import tv.trakt.trakt.core.summary.ui.views.DetailsStreamingSkeleton
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.TraktSectionHeader
+import tv.trakt.trakt.ui.theme.DefaultCardShape
+import tv.trakt.trakt.ui.theme.TraktTheme
+
+@Composable
+internal fun EpisodeStreamingsView(
+    viewModel: EpisodeStreamingsViewModel,
+    headerPadding: PaddingValues,
+    contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+    onAllStreamingsClick: () -> Unit = {},
+) {
+    val context = LocalContext.current
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    EpisodeStreamingsContent(
+        state = state,
+        modifier = modifier,
+        headerPadding = headerPadding,
+        contentPadding = contentPadding,
+        onCollapse = viewModel::setCollapsed,
+        onAllStreamingsClick = onAllStreamingsClick,
+        onClick = { service ->
+            viewModel.logStreamOn(service)
+            openExternalAppLink(
+                packageId = StreamingServiceApp.findFromSource(service.source)?.packageId,
+                packageName = service.source,
+                uri = service.linkDirect?.toUri(),
+                context = context,
+            )
+        },
+    )
+}
+
+@Composable
+private fun EpisodeStreamingsContent(
+    state: EpisodeStreamingsState,
+    modifier: Modifier = Modifier,
+    headerPadding: PaddingValues = PaddingValues(),
+    contentPadding: PaddingValues = PaddingValues(),
+    onCollapse: ((Boolean) -> Unit)? = null,
+    onAllStreamingsClick: () -> Unit = {},
+    onClick: ((StreamingService) -> Unit)? = null,
+) {
+    var animateCollapse by rememberSaveable { mutableStateOf(false) }
+
+    Column(
+        verticalArrangement = spacedBy(12.dp),
+        modifier = modifier
+            .animateContentSize(animationSpec = if (animateCollapse) spring() else snap()),
+    ) {
+        Column(
+            verticalArrangement = spacedBy(3.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(headerPadding),
+        ) {
+            TraktSectionHeader(
+                title = stringResource(R.string.page_title_where_to_watch),
+                chevron = state.loading == Done,
+                collapsed = state.collapsed ?: false,
+                onCollapseClick = {
+                    animateCollapse = true
+                    val current = (state.collapsed ?: false)
+                    onCollapse?.invoke(!current)
+                },
+                modifier = Modifier.onClick(enabled = state.loading == Done) {
+                    onAllStreamingsClick()
+                },
+            )
+
+            JustWatchRanksStrip(
+                ranks = state.items?.ranks,
+                justWatchLink = state.items?.justWatchLink,
+            )
+        }
+
+        if (state.collapsed != true) {
+            Crossfade(
+                targetState = state.loading,
+                animationSpec = tween(200),
+            ) { loading ->
+                when (loading) {
+                    Idle, Loading -> {
+                        ContentLoading(
+                            visible = loading.isLoading,
+                            contentPadding = contentPadding,
+                            modifier = Modifier
+                                .padding(bottom = TraktTheme.spacing.shadowClipSpace),
+                        )
+                    }
+
+                    Done -> {
+                        if (state.items?.streamings?.isEmpty() == true) {
+                            ContentEmpty(
+                                contentPadding = headerPadding,
+                                modifier = Modifier
+                                    .padding(bottom = TraktTheme.spacing.shadowClipSpace),
+                            )
+                        } else {
+                            ContentList(
+                                listItems = (state.items?.streamings ?: emptyList()).toImmutableList(),
+                                contentPadding = contentPadding,
+                                onClick = onClick,
+                                modifier = Modifier
+                                    .padding(bottom = TraktTheme.spacing.shadowClipSpace),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContentList(
+    modifier: Modifier = Modifier,
+    listItems: ImmutableList<Pair<StreamingService, StreamingType>>,
+    listState: LazyListState = rememberLazyListState(),
+    contentPadding: PaddingValues,
+    onClick: ((StreamingService) -> Unit)? = null,
+) {
+    LazyRow(
+        state = listState,
+        horizontalArrangement = spacedBy(TraktTheme.spacing.mainRowSpace),
+        verticalAlignment = CenterVertically,
+        contentPadding = contentPadding,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        items(
+            items = listItems,
+            key = { "${it.second.type}_${it.first.source}_${it.first.channel}" },
+        ) { (service, type) ->
+            DetailsStreamingItem(
+                service = service,
+                type = type,
+                onClick = onClick,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ContentLoading(
+    modifier: Modifier = Modifier,
+    visible: Boolean = true,
+    contentPadding: PaddingValues,
+) {
+    LazyRow(
+        horizontalArrangement = spacedBy(TraktTheme.spacing.mainRowSpace),
+        contentPadding = contentPadding,
+        userScrollEnabled = false,
+        modifier = modifier
+            .fillMaxWidth()
+            .alpha(if (visible) 1F else 0F),
+    ) {
+        items(count = 3) {
+            DetailsStreamingSkeleton()
+        }
+    }
+}
+
+@Composable
+private fun ContentEmpty(
+    contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(86.dp)
+            .padding(contentPadding)
+            .shadow(
+                elevation = TraktTheme.colors.shadowDynamicDefault,
+                shape = DefaultCardShape,
+            )
+            .background(TraktTheme.colors.commentContainer, DefaultCardShape)
+            .padding(18.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = stringResource(R.string.button_text_no_services),
+            color = TraktTheme.colors.textSecondary,
+            style = TraktTheme.typography.heading6,
+        )
+    }
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@Preview(
+    device = "id:pixel_5",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+)
+@Composable
+private fun Preview() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.Blue.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            EpisodeStreamingsContent(
+                state = EpisodeStreamingsState(),
+            )
+        }
+    }
+}

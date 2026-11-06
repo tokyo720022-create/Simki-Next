@@ -1,0 +1,402 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
+package tv.trakt.trakt.core.home.sections.upcoming
+
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.google.firebase.Firebase
+import com.google.firebase.remoteconfig.remoteConfig
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
+import org.koin.androidx.compose.koinViewModel
+import tv.trakt.trakt.common.firebase.FirebaseConfig.RemoteKey.MOBILE_EMPTY_IMAGE_3
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.LoadingState.Idle
+import tv.trakt.trakt.common.helpers.LoadingState.Loading
+import tv.trakt.trakt.common.helpers.extensions.onClick
+import tv.trakt.trakt.common.model.Episode
+import tv.trakt.trakt.common.model.MediaMode
+import tv.trakt.trakt.common.model.Movie
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.calendar.CalendarItem
+import tv.trakt.trakt.core.calendar.ui.context.sheet.CalendarEpisodeContextSheet
+import tv.trakt.trakt.core.discover.sections.releases.model.ReleaseType
+import tv.trakt.trakt.core.home.sections.upcoming.views.EpisodeUpcomingItemView
+import tv.trakt.trakt.core.home.sections.upcoming.views.MovieUpcomingItemView
+import tv.trakt.trakt.core.home.views.HomeEmptyView
+import tv.trakt.trakt.core.movies.ui.context.sheet.MovieContextSheet
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.TraktSectionHeader
+import tv.trakt.trakt.ui.components.chips.FilterChip
+import tv.trakt.trakt.ui.components.chips.FilterChipGroup
+import tv.trakt.trakt.ui.components.mediacards.skeletons.EpisodeSkeletonCard
+import tv.trakt.trakt.ui.theme.TraktTheme
+
+@Composable
+internal fun HomeUpcomingView(
+    modifier: Modifier = Modifier,
+    viewModel: HomeUpcomingViewModel = koinViewModel(),
+    headerPadding: PaddingValues,
+    contentPadding: PaddingValues,
+    onEpisodeClick: (showId: TraktId, episode: Episode) -> Unit,
+    onShowClick: (TraktId) -> Unit,
+    onShowsClick: () -> Unit,
+    onMoviesClick: () -> Unit,
+    onMovieClick: (TraktId) -> Unit,
+    onCalendarClick: () -> Unit,
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    var contextEpisodeSheet by remember { mutableStateOf<CalendarItem.EpisodeItem?>(null) }
+    var contextMovieSheet by remember { mutableStateOf<Movie?>(null) }
+
+    LaunchedEffect(
+        state.navigateShow,
+        state.navigateMovie,
+        state.navigateEpisode,
+    ) {
+        state.navigateShow?.let {
+            onShowClick(it)
+            viewModel.clearNavigation()
+        }
+        state.navigateEpisode?.let {
+            onEpisodeClick(it.first, it.second)
+            viewModel.clearNavigation()
+        }
+        state.navigateMovie?.let {
+            onMovieClick(it)
+            viewModel.clearNavigation()
+        }
+    }
+
+    HomeUpcomingContent(
+        state = state,
+        modifier = modifier,
+        headerPadding = headerPadding,
+        contentPadding = contentPadding,
+        onCollapse = viewModel::setCollapsed,
+        onCalendarClick = onCalendarClick,
+        onTypeClick = viewModel::setType,
+        onEmptyClick = {
+            when (state.filter?.mode) {
+                MediaMode.Movies -> onMoviesClick()
+                else -> onShowsClick()
+            }
+        },
+        onClick = {
+            viewModel.navigateToEpisode(it.show, it.episode)
+        },
+        onShowClick = {
+            viewModel.navigateToShow(it.show)
+        },
+        onMovieClick = {
+            viewModel.navigateToMovie(it)
+        },
+        onLongClick = {
+            when (it) {
+                is CalendarItem.EpisodeItem -> contextEpisodeSheet = it
+                is CalendarItem.MovieItem -> contextMovieSheet = it.movie
+            }
+        },
+    )
+
+    CalendarEpisodeContextSheet(
+        item = contextEpisodeSheet,
+        showWatchlist = false,
+        showDrop = true,
+        onDismiss = { contextEpisodeSheet = null },
+    )
+
+    MovieContextSheet(
+        movie = contextMovieSheet,
+        onDismiss = { contextMovieSheet = null },
+    )
+}
+
+@Composable
+internal fun HomeUpcomingContent(
+    state: HomeUpcomingState,
+    modifier: Modifier = Modifier,
+    headerPadding: PaddingValues = PaddingValues(),
+    contentPadding: PaddingValues = PaddingValues(),
+    onClick: (CalendarItem.EpisodeItem) -> Unit = {},
+    onShowClick: (CalendarItem.EpisodeItem) -> Unit = {},
+    onMovieClick: (Movie) -> Unit = {},
+    onLongClick: ((CalendarItem) -> Unit)? = null,
+    onEmptyClick: () -> Unit = {},
+    onCalendarClick: () -> Unit = {},
+    onTypeClick: (ReleaseType) -> Unit = {},
+    onCollapse: (collapsed: Boolean) -> Unit = {},
+) {
+    var animateCollapse by rememberSaveable { mutableStateOf(false) }
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(TraktTheme.spacing.mainRowHeaderSpace),
+        modifier = modifier
+            .animateContentSize(
+                animationSpec = if (animateCollapse) spring() else snap(),
+            ),
+    ) {
+        TraktSectionHeader(
+            title = stringResource(R.string.page_title_calendar),
+            chevron = state.user != null,
+            collapsed = state.collapsed ?: false,
+            onCollapseClick = {
+                animateCollapse = true
+                val current = (state.collapsed ?: false)
+                onCollapse(!current)
+            },
+            modifier = Modifier
+                .padding(headerPadding)
+                .onClick(enabled = state.user != null) {
+                    onCalendarClick()
+                },
+        )
+
+        if (state.collapsed != true) {
+            if (state.user != null) {
+                ContentFilters(
+                    selected = state.type,
+                    headerPadding = headerPadding,
+                    onTypeClick = onTypeClick,
+                )
+            }
+
+            Crossfade(
+                targetState = state.loading,
+                animationSpec = tween(200),
+            ) { loading ->
+                when (loading) {
+                    Idle, Loading -> {
+                        ContentLoadingList(
+                            visible = loading.isLoading,
+                            contentPadding = contentPadding,
+                        )
+                    }
+
+                    Done -> {
+                        when {
+                            state.error != null -> {
+                                Text(
+                                    text =
+                                        "${
+                                            stringResource(
+                                                R.string.error_text_unexpected_error_short,
+                                            )
+                                        }\n\n${state.error}",
+                                    color = TraktTheme.colors.textSecondary,
+                                    style = TraktTheme.typography.meta,
+                                    maxLines = 10,
+                                    modifier = Modifier.padding(contentPadding),
+                                )
+                            }
+
+                            state.items?.isEmpty() == true -> {
+                                val imageUrl = remember {
+                                    Firebase.remoteConfig.getString(MOBILE_EMPTY_IMAGE_3).ifBlank { null }
+                                }
+                                HomeEmptyView(
+                                    text = stringResource(R.string.text_cta_upcoming),
+                                    icon = R.drawable.ic_empty_upcoming,
+                                    buttonText = stringResource(
+                                        when (state.filter?.mode) {
+                                            MediaMode.Movies -> R.string.link_text_discover_movies
+                                            else -> R.string.link_text_discover_shows
+                                        },
+                                    ),
+                                    backgroundImageUrl = imageUrl,
+                                    backgroundImage = if (imageUrl == null) R.drawable.ic_splash_background_2 else null,
+                                    onClick = onEmptyClick,
+                                    modifier = Modifier
+                                        .padding(contentPadding),
+                                )
+                            }
+
+                            else -> {
+                                ContentList(
+                                    listItems = (state.items ?: emptyList()).toImmutableList(),
+                                    contentPadding = contentPadding,
+                                    onClick = onClick,
+                                    onShowClick = onShowClick,
+                                    onMovieClick = onMovieClick,
+                                    onLongClick = onLongClick.takeIf { state.user != null },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContentFilters(
+    selected: ReleaseType,
+    headerPadding: PaddingValues,
+    onTypeClick: (ReleaseType) -> Unit,
+) {
+    FilterChipGroup(
+        paddingVertical = PaddingValues(bottom = 3.dp),
+        paddingHorizontal = headerPadding,
+    ) {
+        for (type in ReleaseType.entries) {
+            FilterChip(
+                selected = selected == type,
+                text = stringResource(type.textRes),
+                leadingContent = {
+                    Icon(
+                        painter = painterResource(type.iconRes),
+                        contentDescription = null,
+                        tint = TraktTheme.colors.textPrimaryOnAccent,
+                        modifier = Modifier.size(type.iconSize),
+                    )
+                },
+                onClick = { onTypeClick(type) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ContentLoadingList(
+    visible: Boolean = true,
+    contentPadding: PaddingValues,
+) {
+    LazyRow(
+        horizontalArrangement = spacedBy(TraktTheme.spacing.mainRowSpace),
+        contentPadding = contentPadding,
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (visible) 1F else 0F),
+    ) {
+        items(count = 8) {
+            EpisodeSkeletonCard()
+        }
+    }
+}
+
+@Composable
+private fun ContentList(
+    listItems: ImmutableList<CalendarItem>,
+    listState: LazyListState = rememberLazyListState(),
+    contentPadding: PaddingValues,
+    onClick: (CalendarItem.EpisodeItem) -> Unit,
+    onShowClick: (CalendarItem.EpisodeItem) -> Unit,
+    onMovieClick: (Movie) -> Unit,
+    onLongClick: ((CalendarItem) -> Unit)?,
+) {
+    val currentList = remember { mutableIntStateOf(listItems.hashCode()) }
+
+    LaunchedEffect(listItems) {
+        val hashCode = listItems.hashCode()
+        if (currentList.intValue != hashCode) {
+            currentList.intValue = hashCode
+            listState.animateScrollToItem(0)
+        }
+    }
+
+    LazyRow(
+        state = listState,
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(TraktTheme.spacing.mainRowSpace),
+        contentPadding = contentPadding,
+    ) {
+        items(
+            items = listItems,
+            key = { it.id.value },
+        ) { item ->
+            when (item) {
+                is CalendarItem.MovieItem -> {
+                    MovieUpcomingItemView(
+                        item = item,
+                        onClick = { onMovieClick(item.movie) },
+                        onLongClick = onLongClick?.let { { it(item) } },
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = null,
+                            fadeOutSpec = null,
+                        ),
+                    )
+                }
+
+                is CalendarItem.EpisodeItem -> {
+                    EpisodeUpcomingItemView(
+                        item = item,
+                        midReleases = true,
+                        onClick = { onClick(item) },
+                        onShowClick = { onShowClick(item) },
+                        onLongClick = onLongClick?.let { { it(item) } },
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = null,
+                            fadeOutSpec = null,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Preview(
+    device = "id:pixel_5",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+)
+@Composable
+private fun Preview() {
+    TraktTheme {
+        HomeUpcomingContent(
+            state = HomeUpcomingState(
+                loading = Idle,
+            ),
+        )
+    }
+}
+
+@Preview(
+    device = "id:pixel_5",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+)
+@Composable
+private fun Preview2() {
+    TraktTheme {
+        HomeUpcomingContent(
+            state = HomeUpcomingState(
+                loading = Loading,
+            ),
+        )
+    }
+}

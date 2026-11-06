@@ -1,0 +1,96 @@
+package tv.trakt.trakt.core.sync.usecases
+
+import tv.trakt.trakt.common.core.user.usecases.progress.LoadUserProgressUseCase
+import tv.trakt.trakt.common.data.remote.EpisodesRemoteSource
+import tv.trakt.trakt.common.data.remote.EpisodesSyncRemoteSource
+import tv.trakt.trakt.common.data.remote.ShowsRemoteSource
+import tv.trakt.trakt.common.data.remote.ShowsSyncRemoteSource
+import tv.trakt.trakt.common.firebase.analytics.Analytics
+import tv.trakt.trakt.common.helpers.extensions.asyncMap
+import tv.trakt.trakt.common.helpers.extensions.nowUtcInstant
+import tv.trakt.trakt.common.model.DateSelectionResult
+import tv.trakt.trakt.common.model.Episode
+import tv.trakt.trakt.common.model.MediaType
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.fromDto
+import tv.trakt.trakt.core.ratings.RemoveOrphanedRatingUseCase
+import tv.trakt.trakt.widgets.data.WidgetsUpdater
+
+internal class UpdateShowHistoryUseCase(
+    private val remoteSource: ShowsSyncRemoteSource,
+    private val remoteEpisodesSyncSource: EpisodesSyncRemoteSource,
+    private val remoteShowsSource: ShowsRemoteSource,
+    private val remoteEpisodesSource: EpisodesRemoteSource,
+    private val loadProgressUseCase: LoadUserProgressUseCase,
+    private val widgetsUpdater: WidgetsUpdater,
+    private val analytics: Analytics,
+    private val orphanedRatings: RemoveOrphanedRatingUseCase,
+) {
+    suspend fun addToWatched(
+        showId: TraktId,
+        customDate: DateSelectionResult? = null,
+        watchAgain: Boolean = false,
+    ) {
+        val watchedAt = customDate?.dateString
+            ?: nowUtcInstant().toString()
+
+        val watchedIds = when (loadProgressUseCase.isShowsLoaded()) {
+            true -> loadProgressUseCase.loadLocalShows()
+            false -> loadProgressUseCase.loadShowsProgress()
+        }
+            .firstOrNull { it.showId == showId }
+            ?.seasons
+            ?.flatMap { season -> season.episodes.map { it.id } }
+            ?.toSet()
+            .orEmpty()
+
+        if (watchedIds.isEmpty() || watchAgain) {
+            remoteSource.addToWatched(
+                showId = showId,
+                watchedAt = watchedAt,
+            )
+        } else {
+            val unwatchedIds = getUnwatchedEpisodeIds(showId, watchedIds)
+            if (unwatchedIds.isNotEmpty()) {
+                remoteEpisodesSyncSource.addToHistory(
+                    episodeIds = unwatchedIds,
+                    watchedAt = watchedAt,
+                )
+            }
+        }
+
+        widgetsUpdater.refreshInBackground()
+    }
+
+    suspend fun removeAllFromHistory(showId: TraktId) {
+        val orphanedRating = orphanedRatings.findShow(showId)
+        remoteSource.removeAllFromHistory(
+            showId = showId,
+        )
+        orphanedRatings.remove(orphanedRating)
+        widgetsUpdater.refreshInBackground()
+    }
+
+    suspend fun dropShow(showId: TraktId) {
+        remoteSource.dropShow(showId)
+        analytics.progress.logDrop(MediaType.Show.value)
+        widgetsUpdater.refreshInBackground()
+    }
+
+    private suspend fun getUnwatchedEpisodeIds(
+        showId: TraktId,
+        watchedIds: Set<TraktId>,
+    ): List<TraktId> {
+        return remoteShowsSource.getSeasons(showId)
+            .filter { it.number > 0 }
+            .asyncMap { season ->
+                remoteEpisodesSource.getSeason(
+                    showId = showId,
+                    season = season.number,
+                ).asyncMap { Episode.fromDto(it) }
+            }
+            .flatten()
+            .filter { it.isReleased && it.ids.trakt !in watchedIds }
+            .map { it.ids.trakt }
+    }
+}

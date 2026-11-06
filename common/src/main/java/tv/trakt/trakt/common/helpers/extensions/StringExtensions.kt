@@ -1,0 +1,220 @@
+package tv.trakt.trakt.common.helpers.extensions
+
+import android.graphics.Typeface
+import android.icu.text.CompactDecimalFormat
+import android.icu.text.MeasureFormat
+import android.icu.text.MeasureFormat.FormatWidth
+import android.icu.util.Measure
+import android.icu.util.MeasureUnit
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
+import android.text.style.UnderlineSpan
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
+import java.text.NumberFormat
+import java.util.Locale
+import kotlin.math.abs
+
+/**
+ * Formats an integer into a compact string representation using thousands (e.g., 1.2K for 1200).
+ */
+private fun Int.thousandsFormat(
+    locale: Locale = AppCompatDelegate.getApplicationLocales().get(0) ?: Locale.getDefault(),
+    significantDigits: Int,
+): String {
+    if (this < 1000) return this.toString()
+    val fmt = CompactDecimalFormat.getInstance(locale, CompactDecimalFormat.CompactStyle.SHORT)
+        .apply {
+            maximumSignificantDigits = significantDigits
+        }
+    return fmt.format(this)
+}
+
+/**
+ * Composable function that formats an integer into a compact string representation using thousands and remembers the result.
+ */
+@Composable
+fun rememberThousandsFormat(
+    count: Int,
+    significantDigits: Int = 2,
+): String {
+    val configuration = LocalConfiguration.current
+    return remember(count, configuration) {
+        val configurationLocale = AppCompatDelegate.getApplicationLocales().get(0) ?: Locale.getDefault()
+        count.thousandsFormat(configurationLocale, significantDigits)
+    }
+}
+
+/**
+ * Composable function that formats an integer into a locale-aware string representation and remembers the result.
+ */
+@Composable
+fun rememberNumberFormat(number: Int): String {
+    val configuration = LocalConfiguration.current
+    return remember(number, configuration) {
+        val configurationLocale = AppCompatDelegate.getApplicationLocales().get(0) ?: Locale.getDefault()
+        NumberFormat.getNumberInstance(configurationLocale).format(number)
+    }
+}
+
+/**
+ * Formats a duration in minutes into a human-readable string.
+ */
+fun Long.durationFormat(
+    locale: Locale = AppCompatDelegate.getApplicationLocales().get(0) ?: Locale.getDefault(),
+): String {
+    val magnitude = abs(this)
+    val days = magnitude / (60 * 24)
+    val hours = (magnitude % (60 * 24)) / 60
+    val minutes = magnitude % 60
+
+    val measures = mutableListOf<Measure>()
+    if (days > 0) {
+        measures.add(Measure(days, MeasureUnit.DAY))
+    }
+    if (hours > 0) {
+        measures.add(Measure(hours, MeasureUnit.HOUR))
+    }
+    if (minutes > 0 || measures.isEmpty()) {
+        measures.add(Measure(minutes, MeasureUnit.MINUTE))
+    }
+
+    val format = MeasureFormat.getInstance(locale, FormatWidth.NARROW)
+    val formatted = format.formatMeasures(*measures.toTypedArray()).capitalize()
+    return if (this < 0) "-$formatted" else formatted
+}
+
+/**
+ * Formats a whole-number percentage (e.g. 94) as a locale-aware percent
+ * string (e.g. "94%" in English, "94 %" in German), rather than
+ * concatenating a literal "%" that assumes English's no-space convention.
+ */
+@Composable
+fun Int.rememberPercentFormat(): String {
+    val appLocale = remember(LocalConfiguration.current) {
+        AppCompatDelegate.getApplicationLocales().get(0) ?: Locale.getDefault()
+    }
+    return NumberFormat.getPercentInstance(appLocale).format(this / 100.0)
+}
+
+/**
+ * Composable function that formats a duration in minutes into a human-readable string and remembers the result.
+ * If the duration is null, it returns "N/A".
+ */
+@Composable
+fun rememberDurationFormat(
+    duration: Long?,
+    spaces: Boolean = true,
+): String {
+    if (duration == null) {
+        return "N/A"
+    }
+
+    val configuration = LocalConfiguration.current
+    return remember(duration, configuration) {
+        val configurationLocale = AppCompatDelegate.getApplicationLocales().get(0) ?: Locale.getDefault()
+        val format = duration.durationFormat(configurationLocale)
+        when {
+            spaces -> format
+            else -> format.replace(" ", "")
+        }
+    }
+}
+
+/**
+ * Converts the first letter of each word in the string to uppercase.
+ * For example, "hello world" becomes "Hello World".
+ */
+fun String.uppercaseWords(): String {
+    return this.split(" ").joinToString(" ") { word ->
+        word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+    }
+}
+
+/**
+ * Converts an Android Spanned string to a Compose AnnotatedString,
+ * preserving styles such as bold, italic, underline, and foreground color.
+ */
+fun Spanned.toAnnotatedString(): AnnotatedString {
+    return buildAnnotatedString {
+        val spanned = this@toAnnotatedString
+        append(spanned.toString())
+        getSpans(0, spanned.length, Any::class.java).forEach { span ->
+            val start = getSpanStart(span)
+            val end = getSpanEnd(span)
+            when (span) {
+                is StyleSpan -> when (span.style) {
+                    Typeface.BOLD -> addStyle(SpanStyle(fontWeight = FontWeight.Bold), start, end)
+                    Typeface.ITALIC -> addStyle(SpanStyle(fontStyle = FontStyle.Italic), start, end)
+                    Typeface.BOLD_ITALIC -> addStyle(
+                        SpanStyle(fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic),
+                        start,
+                        end,
+                    )
+                }
+                is UnderlineSpan -> addStyle(SpanStyle(textDecoration = TextDecoration.Underline), start, end)
+                is ForegroundColorSpan -> addStyle(SpanStyle(color = Color(span.foregroundColor)), start, end)
+            }
+        }
+    }
+}
+
+/**
+ * Converts a string with custom markup (e.g., **bold**) into an AnnotatedString with the specified style applied to the marked text.
+ */
+fun customAnnotatedString(
+    string: String,
+    style: SpanStyle,
+): AnnotatedString {
+    return buildAnnotatedString {
+        val regex = "\\*\\*(.*?)\\*\\*".toRegex()
+        var lastIndex = 0
+        regex.findAll(string).forEach { result ->
+            append(string.substring(lastIndex, result.range.first))
+            withStyle(
+                style.copy(
+                    fontWeight = FontWeight.W600,
+                    textDecoration = TextDecoration.Underline,
+                ),
+            ) {
+                append(result.groupValues[1])
+            }
+            lastIndex = result.range.last + 1
+        }
+        append(string.substring(lastIndex))
+    }
+}
+
+/**
+ * Capitalizes the first letter of the string, leaving the rest unchanged.
+ * For example, "hello world" becomes "Hello world".
+ */
+fun String.capitalize(): String {
+    return this.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+}
+
+/**
+ * Normalizes a user-entered URL to https, adding the scheme when it is missing.
+ * Returns null for blank input.
+ */
+fun String.toHttpsUrl(): String? {
+    val url = trim()
+    if (url.isEmpty()) return null
+
+    return when {
+        url.startsWith("https://", ignoreCase = true) -> url
+        url.startsWith("http://", ignoreCase = true) -> "https://${url.substring("http://".length)}"
+        else -> "https://$url"
+    }
+}

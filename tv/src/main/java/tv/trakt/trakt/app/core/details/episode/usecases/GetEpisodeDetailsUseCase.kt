@@ -1,0 +1,35 @@
+package tv.trakt.trakt.app.core.details.episode.usecases
+
+import tv.trakt.trakt.common.data.local.EpisodeLocalSource
+import tv.trakt.trakt.common.data.remote.EpisodesRemoteSource
+import tv.trakt.trakt.common.model.Episode
+import tv.trakt.trakt.common.model.SeasonEpisode
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.fromDto
+
+internal class GetEpisodeDetailsUseCase(
+    private val localSource: EpisodeLocalSource,
+    private val remoteSource: EpisodesRemoteSource,
+) {
+    suspend fun getEpisodeDetails(
+        showId: TraktId,
+        episodeId: TraktId,
+        seasonEpisode: SeasonEpisode,
+    ): Episode? {
+        val localEpisode = localSource.getEpisode(episodeId)
+        if (localEpisode != null) {
+            return localEpisode
+        }
+
+        val remoteEpisode = remoteSource.getEpisodeDetails(
+            showId = showId,
+            season = seasonEpisode.season,
+            episode = seasonEpisode.episode,
+        )
+
+        return Episode.fromDto(remoteEpisode)
+            .also {
+                localSource.upsertEpisodes(listOf(it))
+            }
+    }
+}

@@ -1,0 +1,114 @@
+import com.android.build.gradle.internal.cxx.configure.gradleLocalProperties
+
+plugins {
+    alias(libs.plugins.android.library)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
+}
+
+private val localProperties = gradleLocalProperties(rootDir, providers)
+
+android {
+    namespace = "tv.trakt.trakt.common"
+    compileSdk = libs.versions.compileSdk.get().toInt()
+
+    defaultConfig {
+        minSdk = libs.versions.minSdk.get().toInt()
+
+        val versionCode = libs.versions.versionCode.get().toInt()
+        val versionName = libs.versions.versionName.get()
+
+        buildConfigField("int", "VERSION_CODE", versionCode.toString())
+        buildConfigField("String", "VERSION_NAME", "\"${versionName}\"")
+        buildConfigField("String", "TRAKT_API_KEY", localProperties.getProperty("TRAKT_API_KEY"))
+        buildConfigField("String", "KLIPY_API_KEY", localProperties.getProperty("KLIPY_API_KEY", "\"\""))
+        buildConfigField(
+            "Boolean",
+            "DEBUG_DELAY_ENABLED",
+            localProperties.getProperty("DEBUG_DELAY_ENABLED", false.toString())
+        )
+
+        consumerProguardFiles("consumer-rules.pro")
+    }
+
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+
+    flavorDimensions += "version"
+    productFlavors {
+        create("playstore") {
+            dimension = "version"
+        }
+        create("internal") {
+            dimension = "version"
+        }
+    }
+
+    kotlin {
+        jvmToolchain(11)
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
+
+    sourceSets {
+        getByName("main") {
+            kotlin.directories += "${rootDir}/build/generate-resources/main/src/main"
+        }
+    }
+}
+
+dependencies {
+    implementation(project(":resources"))
+
+    implementation(libs.androidx.navigation)
+    implementation(libs.androidx.datastore)
+    implementation(libs.androidx.work)
+
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.tooling.preview)
+
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.okhttp)
+    implementation(libs.ktor.client.logger)
+    implementation(libs.ktor.client.serialization)
+    implementation(libs.ktor.client.negotiation)
+    implementation(libs.ktor.client.auth)
+    implementation(libs.kotlinx.serialization.proto)
+
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.config)
+    implementation(libs.firebase.analytics)
+    implementation(libs.firebase.crashlytics)
+
+    implementation(project.dependencies.platform(libs.koin.bom))
+    implementation(libs.koin.core)
+    implementation(libs.koin.android.compose)
+    implementation(libs.koin.android.work)
+
+    implementation(libs.kotlin.immutable.collections)
+    implementation(libs.timber)
+
+    api(libs.coil.compose)
+    api(libs.coil.network)
+    api(libs.coil.svg)
+    api(libs.coil.gif)
+
+    api(libs.youtube.player)
+    api(libs.youtube.player.ui)
+
+    debugImplementation(libs.androidx.compose.tooling)
+}

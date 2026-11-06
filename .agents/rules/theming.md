@@ -1,0 +1,205 @@
+---
+trigger: glob
+globs: '{**/ui/**/*.kt,**/theme/**/*.kt,**/*Theme.kt}'
+description: 'TraktTheme tokens, MaterialTheme overlay, TraktSpacing / TraktTypography / TraktSize / TraktRadius. Coil 3 specifics. TV adaptations.'
+applyTo: '{**/ui/**/*.kt,**/theme/**/*.kt,**/*Theme.kt}'
+paths:
+  - '{app,tv}/src/main/**/*.kt'
+  - '**/ui/**/*.kt'
+  - '**/theme/**/*.kt'
+  - '**/*Theme.kt'
+---
+
+# Theming & Design Tokens
+
+## TraktTheme
+
+Design system exposed through `TraktTheme` (in `common/.../ui/theme/Theme.kt`). Four token
+namespaces:
+
+```kotlin
+@Composable
+fun TraktTheme(
+    colors: TraktColors = TraktTheme.colors,
+    typography: TraktTypography = TraktTheme.typography,
+    spacing: TraktSpacing = TraktTheme.spacing,
+    size: TraktSize = TraktTheme.size,
+    content: @Composable () -> Unit,
+)
+
+object TraktTheme {
+    val colors: TraktColors @Composable @ReadOnlyComposable get() = LocalTraktColors.current
+    val typography: TraktTypography @Composable @ReadOnlyComposable get() = LocalTraktTypography.current
+    val spacing: TraktSpacing @Composable @ReadOnlyComposable get() = LocalTraktSpacing.current
+    val size: TraktSize @Composable @ReadOnlyComposable get() = LocalTraktSize.current
+}
+```
+
+Use via `TraktTheme.<namespace>.<token>` inside composables. Each namespace = data class of `Color`,
+`TextStyle`, or `Dp` values.
+
+## Colours
+
+Default: colours via `TraktTheme.colors.*`. Semantic, theme-aware UI colours (text, backgrounds,
+surfaces, accents that adapt to light/dark) belong in tokens. For example:
+
+```kotlin
+Text(
+    text = title,
+    color = TraktTheme.colors.textPrimary,
+)
+
+Surface(
+    color = TraktTheme.colors.background,
+) { … }
+```
+
+**Raw `Color(...)` values are allowed when they are not theme-aware design-system colours.**
+Acceptable cases:
+
+- **Brand / fixed colours** — values tied to an external brand (Trakt red, partner logos, rating
+  badges) that stay identical across light/dark.
+- **Decorative / gradients** — overlays, scrims, gradient stops, shadows where the exact value is
+  cosmetic and theme-neutral.
+- **Previews / tooling** — `@Preview`, debug, demo, screenshot code. Non-production composables.
+- **Computed / derived** — runtime-computed colours (alpha blends, `Color.lerp`, hex parsed from
+  API / remote config data).
+- **Theme-neutral one-shots** — `Color.White`, `Color.Transparent`, `Color.Black` where they read
+  correctly in both light and dark.
+
+Keep raw literals close to where they're used; a brand/decorative colour reused in 2+ places earns a
+named `val` (or a token) for clarity.
+
+**Still discouraged in new code:**
+
+- Raw `Color(0xFF…)` as a stand-in for a **semantic, theme-aware** colour (text, background,
+  surface,
+  adaptive accent). Those → **add a token** to `TraktColors` with light/dark variants.
+- `MaterialTheme.colorScheme.primary` direct reads (use Trakt token). Material 3 colour scheme wired
+  underneath; consumers go through `TraktTheme.colors`.
+- `colorResource(R.color.…)` for design-system colours. Colour resources OK for legacy values also
+  referenced from XML (notifications, app icon); new tokens live in theme.
+
+## Theme switching
+
+- Light/dark palette picked at app root in `MainActivity` (`DarkColors` / `LightColors`).
+- Feature code doesn't branch on theme - reads `TraktTheme.colors.*`, active palette swaps
+  automatically.
+
+## Previews (phone)
+
+Preview annotations live in `common/.../helpers/extensions/ComposeExtensions.kt`. Theme wrappers
+live in `app/.../helpers/extensions/ComposeExtensions.kt`.
+
+| Annotation | Renders | Wrap content in |
+| --- | --- | --- |
+| `@PreviewTraktLightDark` | Two previews, "Dark" and "Light" | `TraktThemePreview { }` |
+| `@PreviewTraktDark` | Dark only | `TraktTheme { }` |
+| `@PreviewTraktLight` | Light only | `TraktThemeLight { }` |
+| `@DevicePreview` / `@DevicePreviewRtl` | Full Pixel 7 screen, `us` / `ar` locale | `TraktTheme { }` |
+| `@DeviceSheetPreview` | Full-screen bottom sheet | `TraktTheme { }` |
+
+- **Default to `@PreviewTraktLightDark` + `TraktThemePreview`** for new component and view
+  previews. One preview function covers both palettes.
+- `TraktThemePreview` picks `DarkColors` / `LightColors` from the preview `uiMode`. Plain
+  `TraktTheme { }` is always dark, so under `@PreviewTraktLightDark` the Light preview shows dark
+  content on a light background.
+- `TraktThemeLightDark { }` stacks both palettes in one frame. Use it only when a side-by-side
+  comparison in a single image is the point. Do not combine it with `@PreviewTraktLightDark`.
+- Keep the dedicated `@PreviewTraktDark` / `@PreviewTraktLight` pair only when the two previews
+  need different content or parameters.
+- TV previews use plain `@Preview(...)` with the TV theme wrapper. These annotations are for the
+  phone app.
+
+## Typography
+
+`TraktTheme.typography.*` exposes semantic styles:
+
+```kotlin
+Text(title, style = TraktTheme.typography.title)
+Text(body, style = TraktTheme.typography.body)
+Text(tag, style = TraktTheme.typography.tag)
+```
+
+- New text uses semantic styles; no inline `TextStyle(fontSize = 14.sp)` literals.
+- Honour Dynamic Type — Material 3 picks up system font scale by default. Don't fight with absolute
+  pixel sizes.
+
+## Spacing
+
+`TraktTheme.spacing.*` adaptive — values vary by window size class (phone / tablet / TV). Use named
+scale:
+
+```kotlin
+Column(verticalArrangement = Arrangement.spacedBy(TraktTheme.spacing.md)) { … }
+Modifier.padding(horizontal = TraktTheme.spacing.lg)
+```
+
+- **No magic numbers** (`Modifier.padding(16.dp)`). Use token, or — if value genuinely unique to one
+  composable — declare as private `val` with one-line reason.
+- **Explicit arrangement spacing.** `Column`/`Row` declare
+  `verticalArrangement = Arrangement.spacedBy(...)` / `horizontalArrangement = ...` rather than
+  spacing items with `Spacer(Modifier.height(...))`.
+
+## Sizes
+
+`TraktTheme.size.*` exposes adaptive sizes for icons, avatars, cards, hero artwork. Same rules as
+spacing — use tokens, don't hard-code `64.dp`.
+
+## Material 3 vs TraktTheme
+
+- Codebase wraps Material 3 at root via `MaterialTheme(...)`. Trakt tokens layer on top.
+- Material 3 components (`Button`, `Card`, `TextField`) welcome — pass colours and shapes from
+  `TraktTheme.*`, not raw values.
+
+## Images & icons
+
+- Bitmaps and remote images via **Coil 3** (`io.coil-kt.coil3`) + `AsyncImage` /
+  `SubcomposeAsyncImage`.
+- Local drawables: declare under `resources/.../drawable/`, reference via `R.drawable.<name>`.
+  `Painter` via `painterResource(R.drawable...)`.
+- Material 3 `Icons.Filled.*` / `Icons.Rounded.*` OK for generic glyphs (back arrow, more, search).
+  Reserve custom Trakt icons for branded assets.
+- **Forbidden in new code:** Glide, Fresco, Picasso. Stick with Coil.
+
+### Coil 3 specifics
+
+- Prefer **`SubcomposeAsyncImage`** when composable needs `Loading` / `Error` / `Success` state
+  branches; use `AsyncImage` for common no-branch case.
+- **Image request keys must be stable strings.** Never `UUID.randomUUID()` or
+  `System.currentTimeMillis()` inside request — busts cache on every recomposition.
+- Shared `ImageLoader` wired once in Koin as `single { }`. Custom Coil interceptors (Trakt CDN URL
+  normalisation, fallback-host swaps, accept-header pinning) live in `common/.../networking/coil/`
+  and attach there. Never construct fresh `ImageLoader` per call site.
+- Coil 3 uses **Ktor 3 engine adapter** (`coil-network-ktor3`); reuse existing `HttpClient`, don't
+  spin up parallel OkHttp instance.
+
+## TV-specific theming
+
+- TV module has own `TraktTheme` wrapper using `androidx.tv.material3.MaterialTheme`.
+- Focus styling uses Compose TV built-in focus indicators; don't hand-roll focus rings.
+- Spacing tokens in TV `TraktSpacing` scaled up from phone values — use same semantic name (`md`,
+  `lg`), let token carry platform difference.
+
+## Accessibility
+
+- Touch targets ≥ 48dp on phone, ≥ focus-safe size on TV.
+- **Never add content descriptions or semantics on your own.** No `Modifier.semantics { … }`,
+  `clearAndSetSemantics`, `Role`, or non-null `contentDescription` unless the user explicitly asks.
+  Default to `contentDescription = null` for `Icon` / `Image`. Don't add new strings just to label
+  elements for accessibility.
+- Animations respect reduced motion when system preferences indicate it.
+- Contrast: WCAG AA. Token palette enforces this; don't fight with one-off colours.
+
+## Quick checklist
+
+- [ ] Semantic/theme-aware colours via `TraktTheme.colors.*` — raw `Color(...)` only for brand,
+  decorative, preview, or computed values
+- [ ] Spacing via `TraktTheme.spacing.*` — no `padding(16.dp)`
+- [ ] Sizes via `TraktTheme.size.*` — no `Modifier.size(64.dp)` magic
+- [ ] Typography via `TraktTheme.typography.*` — no inline `TextStyle`
+- [ ] Images via Coil 3 + `R.drawable.*`, never Glide/Fresco/Picasso
+- [ ] Light / dark variants exist for every new token
+- [ ] New previews use `@PreviewTraktLightDark` + `TraktThemePreview { }`
+- [ ] Animations honour reduced-motion
+- [ ] No content descriptions or semantics added unless explicitly requested

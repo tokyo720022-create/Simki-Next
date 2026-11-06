@@ -1,0 +1,449 @@
+package tv.trakt.trakt.ui.components.mediacards
+
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Arrangement.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush.Companion.linearGradient
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil3.ColorImage
+import coil3.annotation.ExperimentalCoilApi
+import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePreviewHandler
+import coil3.compose.LocalAsyncImagePreviewHandler
+import coil3.request.ImageRequest
+import coil3.request.crossfade
+import tv.trakt.trakt.common.helpers.extensions.DevicePreview
+import tv.trakt.trakt.common.helpers.extensions.onClick
+import tv.trakt.trakt.common.helpers.extensions.onClickCombined
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.chips.InfoChip
+import tv.trakt.trakt.ui.theme.HorizontalImageAspectRatio
+import tv.trakt.trakt.ui.theme.TraktTheme
+import tv.trakt.trakt.ui.theme.VerticalImageAspectRatio
+
+@Composable
+internal fun PanelMediaCard(
+    modifier: Modifier = Modifier,
+    title: String,
+    titleOriginal: String?,
+    subtitle: String,
+    subtitleMaxLines: Int = 1,
+    contentImageUrl: String?,
+    containerImageUrl: String?,
+    corner: Dp = 16.dp,
+    imageWidth: Dp = TraktTheme.size.verticalMediumMediaCardSize,
+    more: Boolean = true,
+    watched: Boolean = false,
+    watching: Boolean = false,
+    watchlist: Boolean = false,
+    enabled: Boolean = true,
+    onClick: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
+    onImageClick: (() -> Unit)? = null,
+    footerContent: @Composable (() -> Unit)? = null,
+) {
+    val containerColor = TraktTheme.colors.panelCardContainer
+
+    val mirrored = LocalLayoutDirection.current == LayoutDirection.Rtl
+
+    // graphicsLayer translations are absolute, so they have to be flipped when the layout mirrors.
+    val translationDirection = if (mirrored) -1F else 1F
+
+    var isPosterError by remember { mutableStateOf(false) }
+    var isContainerError by remember { mutableStateOf(false) }
+
+    Row(
+        horizontalArrangement = spacedBy(0.dp),
+        verticalAlignment = Alignment.Top,
+        modifier = modifier
+            .graphicsLayer {
+                clip = false
+            }
+            .shadow(
+                elevation = TraktTheme.colors.shadowDynamicDefault,
+                shape = RoundedCornerShape(16.dp),
+                clip = false,
+            )
+            .background(containerColor, RoundedCornerShape(corner))
+            .alpha(if (enabled) 1F else 0.33F)
+            .height(imageWidth / VerticalImageAspectRatio)
+            .onClickCombined(
+                enabled = enabled,
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .width(imageWidth),
+        ) {
+            if (!contentImageUrl.isNullOrBlank() && !isPosterError) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(contentImageUrl)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = "Card image",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .padding(start = 4.dp)
+                        .padding(vertical = 4.dp)
+                        .aspectRatio(VerticalImageAspectRatio)
+                        .width(imageWidth)
+                        .clip(RoundedCornerShape(corner - 3.dp))
+                        .onClick(
+                            enabled = enabled,
+                            onClick = onImageClick ?: {},
+                        ),
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .padding(start = 4.dp)
+                        .padding(vertical = 4.dp)
+                        .aspectRatio(VerticalImageAspectRatio)
+                        .width(imageWidth)
+                        .clip(RoundedCornerShape(corner - 3.dp))
+                        .background(TraktTheme.colors.placeholderContainer)
+                        .onClick(onClick = onImageClick ?: {}),
+                ) {
+                    Image(
+                        painter = painterResource(R.drawable.ic_trakt_icon),
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        colorFilter = ColorFilter.tint(TraktTheme.colors.placeholderContent),
+                        modifier = Modifier
+                            .size(36.dp)
+                            .align(Alignment.Center),
+                    )
+                }
+            }
+
+            if (watchlist || watched || watching) {
+                val shape = RoundedCornerShape(100)
+                Row(
+                    horizontalArrangement = spacedBy(3.dp),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(start = 4.dp)
+                        .graphicsLayer {
+                            clip = false
+                            translationY = 5.dp.toPx()
+                        },
+                ) {
+                    if (watched || watching) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(
+                                    width = 22.dp,
+                                    height = 16.dp,
+                                )
+                                .shadow(1.dp, shape)
+                                .clip(shape)
+                                .background(TraktTheme.colors.tagChipContainer, shape),
+                        ) {
+                            if (watching) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .fillMaxWidth(0.5f)
+                                        .align(Alignment.CenterEnd)
+                                        .background(TraktTheme.colors.tagChipContainerLight),
+                                )
+                            }
+                            Icon(
+                                painter = painterResource(R.drawable.ic_check_double),
+                                tint = TraktTheme.colors.tagChipContent,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(10.dp),
+                            )
+                        }
+                    }
+
+                    if (watchlist) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(
+                                    width = 22.dp,
+                                    height = 16.dp,
+                                )
+                                .shadow(1.dp, shape)
+                                .background(TraktTheme.colors.tagChipContainer, shape),
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_bookmark_on),
+                                tint = TraktTheme.colors.tagChipContent,
+                                contentDescription = null,
+                                modifier = Modifier.size(11.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .clip(
+                    RoundedCornerShape(
+                        topEnd = corner,
+                        bottomEnd = corner,
+                    ),
+                ),
+        ) {
+            if (!containerImageUrl.isNullOrBlank() && !isContainerError) {
+                val inspection = LocalInspectionMode.current
+
+                val imageGradientColor = when {
+                    inspection -> TraktTheme.colors.accent
+                    else -> containerColor.copy(alpha = 0F)
+                }
+
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(containerImageUrl)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    onError = { isContainerError = true },
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .fillMaxHeight()
+                        .aspectRatio(HorizontalImageAspectRatio)
+                        .drawWithContent {
+                            drawContent()
+
+                            // Mirror the fade so it always runs towards the text side of the card.
+                            val originX = if (mirrored) size.width else 0F
+                            val directionX = if (mirrored) -1F else 1F
+
+                            drawRect(
+                                brush = linearGradient(
+                                    colors = listOf(
+                                        containerColor,
+                                        imageGradientColor,
+                                    ),
+                                    start = Offset(originX + directionX * size.width / 1.75F, size.height),
+                                    end = Offset(originX + directionX * size.width * 1.655F, -size.height),
+                                ),
+                                size = size,
+                            )
+                        },
+                )
+            }
+
+            Column(
+                verticalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .padding(vertical = 10.dp)
+                    .padding(start = 12.dp)
+                    .padding(end = 12.dp)
+                    .fillMaxSize(),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Column(
+                        verticalArrangement = spacedBy(3.dp),
+                        modifier = Modifier.weight(1F),
+                    ) {
+                        Text(
+                            text = title,
+                            style = TraktTheme.typography.cardTitle.copy(fontSize = 16.sp),
+                            color = TraktTheme.colors.textPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+
+                        if (!titleOriginal.isNullOrBlank() && !titleOriginal.equals(title, ignoreCase = true)) {
+                            Text(
+                                text = "($titleOriginal)",
+                                style = TraktTheme.typography.cardSubtitle.copy(fontSize = 12.sp),
+                                color = TraktTheme.colors.textSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(bottom = 3.dp),
+                            )
+                        }
+
+                        Text(
+                            text = subtitle,
+                            style = TraktTheme.typography.cardSubtitle.copy(fontSize = 12.sp),
+                            color = TraktTheme.colors.textSecondary,
+                            maxLines = subtitleMaxLines,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+
+                    if (more) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_more_vertical),
+                            contentDescription = null,
+                            tint = TraktTheme.colors.textPrimary,
+                            modifier = Modifier
+                                .padding(top = 2.dp)
+                                .graphicsLayer {
+                                    translationX = 5.dp.toPx() * translationDirection
+                                }
+                                .size(14.dp)
+                                .onClick(enabled = enabled, onClick = onLongClick ?: {}),
+                        )
+                    }
+                }
+
+                footerContent?.let { it() }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@Preview(
+    device = "id:pixel_7",
+    showBackground = false,
+    backgroundColor = 0xFFFFFF,
+    widthDp = 350,
+    locale = "us",
+)
+@Composable
+private fun PosterPreview() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.Blue.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            PanelMediaCard(
+                title = "Lorem",
+                titleOriginal = null,
+                subtitle = "Action, Adventure",
+                contentImageUrl = "https://example.com/poster.jpg",
+                containerImageUrl = "https://example.com/container.jpg",
+                watched = true,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@DevicePreview
+@Composable
+private fun PosterPreviewPlaceholder() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.Blue.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            PanelMediaCard(
+                title = "Lorem",
+                titleOriginal = "Original Lorem",
+                subtitle = "Action, Adventure",
+                contentImageUrl = "https://example.com/poster.jpg",
+                containerImageUrl = "https://example.com/container.jpg",
+                watched = true,
+                watchlist = true,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@Preview(
+    device = "id:pixel_7",
+    showBackground = false,
+    backgroundColor = 0xFFFFFF,
+    widthDp = 350,
+    locale = "ar",
+)
+@Composable
+private fun PosterPreviewRtl() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.Blue.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            PanelMediaCard(
+                title = "لوريم",
+                titleOriginal = null,
+                subtitle = "أكشن، مغامرة",
+                contentImageUrl = "https://example.com/poster.jpg",
+                containerImageUrl = "https://example.com/container.jpg",
+                watched = true,
+                watchlist = true,
+            )
+        }
+    }
+}
+
+@DevicePreview
+@Composable
+private fun PosterPreviewChipPlaceholder() {
+    TraktTheme {
+        PanelMediaCard(
+            title = "Lorem",
+            titleOriginal = null,
+            subtitle = "Action, Adventure",
+            contentImageUrl = null,
+            containerImageUrl = null,
+            footerContent = {
+                Row(
+                    horizontalArrangement = spacedBy(TraktTheme.spacing.chipsSpace),
+                ) {
+                    InfoChip(
+                        text = "Watched",
+                    )
+                    InfoChip(
+                        text = "PG-18",
+                    )
+                }
+            },
+        )
+    }
+}

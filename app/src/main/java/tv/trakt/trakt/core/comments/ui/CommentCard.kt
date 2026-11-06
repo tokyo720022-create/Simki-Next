@@ -1,0 +1,825 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
+package tv.trakt.trakt.core.comments.ui
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CardDefaults.cardColors
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberTooltipState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontWeight.Companion.W700
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
+import coil3.ColorImage
+import coil3.annotation.ExperimentalCoilApi
+import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePreviewHandler
+import coil3.compose.LocalAsyncImagePreviewHandler
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableMap
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.collections.immutable.toImmutableMap
+import kotlinx.coroutines.launch
+import tv.trakt.trakt.common.helpers.extensions.DevicePreview
+import tv.trakt.trakt.common.helpers.extensions.DevicePreviewRtl
+import tv.trakt.trakt.common.helpers.extensions.EmptyImmutableList
+import tv.trakt.trakt.common.helpers.extensions.capitalize
+import tv.trakt.trakt.common.helpers.extensions.mediumDateFormat
+import tv.trakt.trakt.common.helpers.extensions.onClick
+import tv.trakt.trakt.common.helpers.extensions.toLocal
+import tv.trakt.trakt.common.helpers.extensions.toMarkdownText
+import tv.trakt.trakt.common.helpers.preview.PreviewData
+import tv.trakt.trakt.common.model.Comment
+import tv.trakt.trakt.common.model.CommentGif
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.common.model.reactions.Reaction
+import tv.trakt.trakt.common.model.reactions.ReactionsSummary
+import tv.trakt.trakt.core.comments.features.translation.model.CommentTranslation
+import tv.trakt.trakt.core.comments.features.translation.model.CommentTranslations
+import tv.trakt.trakt.core.comments.features.translation.model.OnDeviceLanguages
+import tv.trakt.trakt.core.comments.features.translation.ui.CommentTranslateButton
+import tv.trakt.trakt.core.reactions.ui.ReactionsSummaryChip
+import tv.trakt.trakt.core.reactions.ui.ReactionsToolTip
+import tv.trakt.trakt.core.report.ReportSheet
+import tv.trakt.trakt.core.report.model.ReportTarget
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.theme.DefaultCardShape
+import tv.trakt.trakt.ui.theme.HorizontalImageAspectRatio
+import tv.trakt.trakt.ui.theme.TraktTheme
+import java.util.Locale
+
+private val EmptyReactionsSummary = emptyMap<Int, ReactionsSummary>().toImmutableMap()
+private val EmptyReactions = emptyMap<Int, Reaction?>().toImmutableMap()
+private val EmptyTranslations = CommentTranslations()
+
+@Composable
+internal fun CommentCard(
+    user: User?,
+    comment: Comment,
+    modifier: Modifier = Modifier,
+    replies: ImmutableList<Comment> = EmptyImmutableList,
+    reactions: ImmutableMap<Int, ReactionsSummary> = EmptyReactionsSummary,
+    userReactions: ImmutableMap<Int, Reaction?> = EmptyReactions,
+    translations: CommentTranslations = EmptyTranslations,
+    replyEnabled: Boolean = false,
+    repliesButtonEnabled: Boolean = false,
+    repliesCountEnabled: Boolean = true,
+    repliesLoading: Boolean = false,
+    progressTotal: Int? = null,
+    gifLayout: CommentGifLayout = CommentGifLayout.Bottom,
+    gifPaused: Boolean = false,
+    onClick: (() -> Unit)? = null,
+    onRequestReactions: ((Comment) -> Unit)? = null,
+    onReactionClick: ((Reaction, Comment) -> Unit)? = null,
+    onRepliesClick: (() -> Unit)? = null,
+    onReplyClick: ((Comment) -> Unit)? = null,
+    onReplyUserClick: ((Comment, User) -> Unit)? = null,
+    onEditClick: (() -> Unit)? = null,
+    onDeleteClick: (() -> Unit)? = null,
+    onDeleteReplyClick: ((Comment) -> Unit)? = null,
+    onUserClick: ((User) -> Unit)? = null,
+    onTranslateClick: ((Comment) -> Unit)? = null,
+    onRevealSpoiler: (() -> Unit)? = null,
+) {
+    LaunchedEffect(comment.id) {
+        if (reactions[comment.id] == null) {
+            onRequestReactions?.invoke(comment)
+        }
+    }
+
+    var reportActive by remember { mutableStateOf(false) }
+
+    val content: @Composable ColumnScope.() -> Unit = {
+        CommentCardContent(
+            user = user,
+            comment = comment,
+            replies = replies,
+            reactions = reactions,
+            userReactions = userReactions,
+            translations = translations,
+            replyEnabled = replyEnabled,
+            repliesButtonEnabled = repliesButtonEnabled,
+            repliesCountEnabled = repliesCountEnabled,
+            repliesLoading = repliesLoading,
+            progressTotal = progressTotal,
+            gifLayout = gifLayout,
+            gifPaused = gifPaused,
+            onRequestReactions = onRequestReactions,
+            onReactionClick = onReactionClick,
+            onReplyClick = { onReplyClick?.invoke(comment) },
+            onReplyUserClick = { onReplyUserClick?.invoke(comment, it) },
+            onRepliesClick = onRepliesClick,
+            onEditClick = onEditClick,
+            onDeleteClick = onDeleteClick,
+            onDeleteReplyClick = onDeleteReplyClick,
+            onReportClick = { reportActive = true },
+            onUserClick = { onUserClick?.invoke(it) },
+            onTranslateClick = onTranslateClick,
+            onRevealSpoiler = onRevealSpoiler,
+        )
+    }
+
+    val isUserComment = remember(user) {
+        comment.user.ids.trakt == user?.ids?.trakt
+    }
+
+    val colors = cardColors(containerColor = TraktTheme.colors.commentContainer)
+    val border = when {
+        isUserComment -> BorderStroke(2.dp, TraktTheme.colors.accent)
+        else -> null
+    }
+
+    if (onClick == null) {
+        Card(
+            modifier = modifier,
+            shape = DefaultCardShape,
+            colors = colors,
+            border = border,
+            elevation = CardDefaults.cardElevation(
+                defaultElevation = TraktTheme.colors.shadowDynamicDefault,
+                pressedElevation = TraktTheme.colors.shadowDynamicDefault,
+                disabledElevation = TraktTheme.colors.shadowDynamicDefault,
+            ),
+            content = content,
+        )
+    } else {
+        Card(
+            modifier = modifier,
+            onClick = onClick,
+            shape = DefaultCardShape,
+            colors = colors,
+            border = border,
+            elevation = CardDefaults.cardElevation(
+                defaultElevation = TraktTheme.colors.shadowDynamicDefault,
+                pressedElevation = TraktTheme.colors.shadowDynamicDefault,
+                disabledElevation = TraktTheme.colors.shadowDynamicDefault,
+            ),
+            content = content,
+        )
+    }
+
+    ReportSheet(
+        active = reportActive,
+        target = ReportTarget.Comment(comment.id),
+        onDismiss = { reportActive = false },
+    )
+}
+
+@Composable
+private fun CommentCardContent(
+    user: User?,
+    comment: Comment,
+    replies: ImmutableList<Comment>,
+    reactions: ImmutableMap<Int, ReactionsSummary>,
+    userReactions: ImmutableMap<Int, Reaction?>,
+    translations: CommentTranslations,
+    replyEnabled: Boolean,
+    repliesButtonEnabled: Boolean,
+    repliesCountEnabled: Boolean,
+    repliesLoading: Boolean,
+    progressTotal: Int?,
+    gifLayout: CommentGifLayout,
+    gifPaused: Boolean,
+    modifier: Modifier = Modifier,
+    onUserClick: ((User) -> Unit)? = null,
+    onReactionClick: ((Reaction, Comment) -> Unit)? = null,
+    onReplyClick: (() -> Unit)? = null,
+    onReplyUserClick: ((User) -> Unit)? = null,
+    onRepliesClick: (() -> Unit)? = null,
+    onEditClick: (() -> Unit)? = null,
+    onDeleteClick: (() -> Unit)? = null,
+    onDeleteReplyClick: ((Comment) -> Unit)? = null,
+    onReportClick: (() -> Unit)? = null,
+    onRequestReactions: ((Comment) -> Unit)? = null,
+    onTranslateClick: ((Comment) -> Unit)? = null,
+    onRevealSpoiler: (() -> Unit)? = null,
+) {
+    var isSpoilerRevealed by remember { mutableStateOf(false) }
+    val revealSpoiler: () -> Unit = {
+        isSpoilerRevealed = true
+        onRevealSpoiler?.invoke()
+    }
+
+    val isUserComment = remember(user) {
+        comment.user.ids.trakt == user?.ids?.trakt
+    }
+
+    Column(
+        verticalArrangement = spacedBy(0.dp),
+        modifier = modifier
+            .padding(vertical = 16.dp)
+            .fillMaxSize(),
+    ) {
+        CommentHeader(
+            comment = comment,
+            userComment = isUserComment,
+            progressTotal = progressTotal,
+            onUserClick = onUserClick,
+            onEditClick = onEditClick,
+            onDeleteClick = onDeleteClick,
+            onReportClick = onReportClick,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+
+        val spoilerBlurred = comment.hasSpoilers && !isUserComment && !isSpoilerRevealed
+        val body = @Composable {
+            CommentBody(
+                text = translations.displayText(comment),
+                blurred = spoilerBlurred,
+                onRevealSpoiler = revealSpoiler,
+            )
+        }
+
+        val gif = comment.gif
+        val gifOnly = gif != null &&
+            gifLayout == CommentGifLayout.Side &&
+            comment.commentNoSpoilers.isBlank()
+        when {
+            gif == null -> {
+                body()
+            }
+            gifLayout == CommentGifLayout.Bottom -> {
+                body()
+                CommentGifView(
+                    gif = gif,
+                    blurred = spoilerBlurred,
+                    paused = gifPaused,
+                    onRevealSpoiler = revealSpoiler,
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 20.dp),
+                )
+            }
+            gifOnly -> {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                ) {
+                    CommentGifView(
+                        gif = gif,
+                        shape = SideGifShape,
+                        blurred = spoilerBlurred,
+                        paused = gifPaused,
+                        onRevealSpoiler = revealSpoiler,
+                        modifier = Modifier
+                            .padding(horizontal = 16.dp)
+                            .padding(top = 14.dp, bottom = 20.dp),
+                    )
+                }
+            }
+            gifLayout == CommentGifLayout.Side -> {
+                Row(
+                    verticalAlignment = Alignment.Top,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        body()
+                    }
+                    CommentGifView(
+                        gif = gif,
+                        shape = SideGifShape,
+                        blurred = spoilerBlurred,
+                        paused = gifPaused,
+                        onRevealSpoiler = revealSpoiler,
+                        modifier = Modifier
+                            .padding(top = 16.dp, end = 16.dp)
+                            .sizeIn(
+                                maxWidth = SideGifMaxSize.width,
+                                maxHeight = SideGifMaxSize.height,
+                            ),
+                    )
+                }
+            }
+        }
+
+        if (!gifOnly) {
+            Spacer(modifier = Modifier.weight(1f))
+        }
+
+        CommentFooter(
+            comment = comment,
+            replies = replies,
+            reactions = reactions[comment.id],
+            reactionsEnabled = user != null && !isUserComment,
+            repliesLoading = repliesLoading,
+            repliesCountEnabled = repliesCountEnabled,
+            repliesButtonEnabled = repliesButtonEnabled,
+            userReaction = userReactions[comment.id],
+            translations = translations,
+            onReactionClick = onReactionClick,
+            onReplyClick = onReplyClick,
+            onRepliesClick = onRepliesClick,
+            onTranslateClick = onTranslateClick,
+            replyEnabled = replyEnabled,
+            modifier = Modifier
+                .padding(
+                    start = 16.dp,
+                    end = 20.dp,
+                ),
+        )
+
+        if (replies.isNotEmpty()) {
+            CommentRepliesContent(
+                user = user,
+                replies = replies,
+                reactions = reactions,
+                userReactions = userReactions,
+                translations = translations,
+                progressTotal = progressTotal,
+                onReactionClick = onReactionClick,
+                onUserClick = onUserClick,
+                onTranslateClick = onTranslateClick,
+                onRevealSpoiler = onRevealSpoiler,
+                onReplyClick = { onReplyUserClick?.invoke(it.user) },
+                onDeleteClick = onDeleteReplyClick,
+                onRequestReactions = onRequestReactions,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CommentBody(
+    text: String,
+    blurred: Boolean,
+    onRevealSpoiler: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val linkColor = TraktTheme.colors.textPrimary
+    val markdownText = remember(text, linkColor) { text.toMarkdownText(linkColor) }
+
+    val body = @Composable {
+        if (text.isBlank()) {
+            Spacer(modifier = Modifier.height(16.dp))
+        } else {
+            Text(
+                text = markdownText,
+                style = TraktTheme.typography.paragraphSmall.copy(lineHeight = 1.3.em),
+                color = TraktTheme.colors.textSecondary,
+                overflow = TextOverflow.Ellipsis,
+                modifier = modifier.then(
+                    if (blurred) {
+                        Modifier
+                            .blur(4.dp)
+                            .padding(horizontal = 16.dp)
+                            .padding(top = 14.dp, bottom = 20.dp)
+                            .onClick { onRevealSpoiler() }
+                    } else {
+                        Modifier
+                            .padding(horizontal = 16.dp)
+                            .padding(top = 14.dp, bottom = 20.dp)
+                    },
+                ),
+            )
+        }
+    }
+
+    if (blurred) {
+        body()
+    } else {
+        SelectionContainer { body() }
+    }
+}
+
+@Composable
+private fun CommentRepliesContent(
+    user: User?,
+    replies: ImmutableList<Comment>,
+    reactions: ImmutableMap<Int, ReactionsSummary>,
+    userReactions: ImmutableMap<Int, Reaction?>,
+    translations: CommentTranslations,
+    progressTotal: Int?,
+    modifier: Modifier = Modifier,
+    onUserClick: ((User) -> Unit)? = null,
+    onReactionClick: ((Reaction, Comment) -> Unit)? = null,
+    onRequestReactions: ((Comment) -> Unit)? = null,
+    onReplyClick: ((Comment) -> Unit)? = null,
+    onDeleteClick: ((Comment) -> Unit)? = null,
+    onTranslateClick: ((Comment) -> Unit)? = null,
+    onRevealSpoiler: (() -> Unit)? = null,
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = modifier
+            .padding(top = 20.dp)
+            .padding(horizontal = 16.dp),
+    ) {
+        for (reply in replies) {
+            CommentReplyCard(
+                user = user,
+                reply = reply,
+                reactions = reactions[reply.id],
+                userReaction = userReactions[reply.id],
+                translations = translations,
+                progressTotal = progressTotal,
+                onUserClick = onUserClick,
+                onTranslateClick = onTranslateClick,
+                onRevealSpoiler = onRevealSpoiler,
+                onReactionClick = { onReactionClick?.invoke(it, reply) },
+                onRequestReactions = { onRequestReactions?.invoke(reply) },
+                onDeleteClick = { onDeleteClick?.invoke(reply) },
+                onReplyClick = { onReplyClick?.invoke(reply) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CommentHeader(
+    comment: Comment,
+    userComment: Boolean,
+    progressTotal: Int?,
+    modifier: Modifier = Modifier,
+    onUserClick: ((User) -> Unit)? = null,
+    onEditClick: (() -> Unit)? = null,
+    onDeleteClick: (() -> Unit)? = null,
+    onReportClick: (() -> Unit)? = null,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .onClick {
+                    onUserClick?.invoke(comment.user)
+                },
+        ) {
+            val avatarBorder = when {
+                comment.user.isAnyVip -> TraktTheme.colors.vipAccent
+                else -> Color.Transparent
+            }
+            val avatar = comment.user.images?.avatar?.full
+            if (avatar != null) {
+                AsyncImage(
+                    model = avatar,
+                    contentDescription = "User avatar",
+                    contentScale = ContentScale.Crop,
+                    error = painterResource(R.drawable.ic_person_placeholder),
+                    modifier = Modifier
+                        .border(2.dp, avatarBorder, CircleShape)
+                        .clip(CircleShape),
+                )
+            } else {
+                Image(
+                    painter = painterResource(R.drawable.ic_person_placeholder),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .border(2.dp, avatarBorder, CircleShape)
+                        .clip(CircleShape),
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        Column(
+            verticalArrangement = spacedBy(1.dp),
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 16.dp),
+        ) {
+            Row(
+                horizontalArrangement = spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = comment.user.displayName,
+                    style = TraktTheme.typography.paragraph.copy(fontWeight = FontWeight.W600),
+                    color = TraktTheme.colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .onClick {
+                            onUserClick?.invoke(comment.user)
+                        },
+                )
+            }
+
+            val dateFormat = mediumDateFormat()
+            Text(
+                text = remember(comment.createdAt) {
+                    comment.createdAt.toLocal().format(dateFormat).capitalize()
+                },
+                style = TraktTheme.typography.meta,
+                color = TraktTheme.colors.textSecondary
+                    .copy(alpha = 0.66f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CommentUserChips(
+                comment = comment,
+                progress = comment.userStats.progress(progressTotal),
+                modifier = Modifier.padding(start = 12.dp),
+            )
+
+            val menuEditClick = onEditClick.takeIf { userComment }
+            val menuDeleteClick = onDeleteClick.takeIf { userComment }
+            val menuReportClick = onReportClick.takeIf { !userComment }
+            if (menuEditClick != null || menuDeleteClick != null || menuReportClick != null) {
+                Spacer(modifier = Modifier.width(16.dp))
+
+                CommentDropdown(
+                    containerColor = TraktTheme.colors.dialogOnContainer,
+                    deleteText = R.string.button_text_delete_note,
+                    onEditClick = menuEditClick,
+                    onDeleteClick = menuDeleteClick,
+                    onReportClick = menuReportClick,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CommentFooter(
+    comment: Comment,
+    replies: ImmutableList<Comment>,
+    reactions: ReactionsSummary?,
+    reactionsEnabled: Boolean,
+    repliesCountEnabled: Boolean,
+    repliesButtonEnabled: Boolean,
+    replyEnabled: Boolean,
+    repliesLoading: Boolean,
+    userReaction: Reaction?,
+    translations: CommentTranslations,
+    modifier: Modifier = Modifier,
+    onReactionClick: ((Reaction, Comment) -> Unit)? = null,
+    onReplyClick: (() -> Unit)? = null,
+    onRepliesClick: (() -> Unit)? = null,
+    onTranslateClick: ((Comment) -> Unit)? = null,
+) {
+    val scope = rememberCoroutineScope()
+    val tooltipState = rememberTooltipState(isPersistent = true)
+
+    Column(
+        modifier = modifier,
+        verticalArrangement = spacedBy(22.dp),
+    ) {
+        if (repliesButtonEnabled && comment.replies > 0) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                modifier = Modifier.onClick(
+                    enabled = !repliesLoading,
+                ) {
+                    onRepliesClick?.invoke()
+                },
+            ) {
+                Icon(
+                    painter = painterResource(
+                        when {
+                            replies.isNotEmpty() -> R.drawable.ic_collapsed
+                            else -> R.drawable.ic_chevron_down_small
+                        },
+                    ),
+                    contentDescription = "Replies",
+                    tint = when {
+                        repliesLoading -> TraktTheme.colors.textSecondary.copy(alpha = 0.5f)
+                        else -> TraktTheme.colors.accentPalette.shade400
+                    },
+                    modifier = Modifier
+                        .size(16.dp)
+                        .scale(
+                            scaleX = when {
+                                replies.isNotEmpty() -> 0.9F
+                                else -> 1F
+                            },
+                            scaleY = 1F,
+                        ),
+                )
+                Text(
+                    text = stringResource(R.string.button_text_comment_replies, comment.replies),
+                    style = TraktTheme.typography.meta.copy(fontSize = 12.sp),
+                    color = when {
+                        repliesLoading -> TraktTheme.colors.textSecondary.copy(alpha = 0.5f)
+                        else -> TraktTheme.colors.accentPalette.shade400
+                    },
+                )
+            }
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 1.dp),
+        ) {
+            ReactionsToolTip(
+                state = tooltipState,
+                reactions = reactions,
+                userReaction = userReaction,
+                onReactionClick = { reaction ->
+                    onReactionClick?.invoke(reaction, comment)
+                },
+            ) {
+                ReactionsSummaryChip(
+                    reactions = reactions,
+                    userReaction = userReaction,
+                    enabled = reactionsEnabled,
+                    modifier = Modifier.onClick {
+                        if (reactions == null || !reactionsEnabled) {
+                            return@onClick
+                        }
+                        scope.launch {
+                            if (tooltipState.isVisible) {
+                                tooltipState.dismiss()
+                            } else {
+                                tooltipState.show()
+                            }
+                        }
+                    },
+                )
+            }
+
+            Row(
+                horizontalArrangement = spacedBy(20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CommentTranslateButton(
+                    comment = comment,
+                    translations = translations,
+                    onTranslateClick = onTranslateClick,
+                )
+                if (repliesCountEnabled && comment.replies > 0) {
+                    Row(
+                        horizontalArrangement = spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.onClick(
+                            enabled = !repliesLoading,
+                        ) {
+                            onRepliesClick?.invoke()
+                        },
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_comment),
+                            contentDescription = "Replies",
+                            tint = TraktTheme.colors.textPrimary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = "${comment.replies}",
+                            style = TraktTheme.typography.paragraphSmall.copy(fontWeight = W700),
+                            color = TraktTheme.colors.textPrimary,
+                        )
+                    }
+                }
+
+                if (replyEnabled) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_comment_plus),
+                        contentDescription = null,
+                        tint = TraktTheme.colors.textPrimary,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .onClick(enabled = !repliesLoading) {
+                                onReplyClick?.invoke()
+                            },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@DevicePreview
+@DevicePreviewRtl
+@Composable
+fun CommentPreview() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.LightGray.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            Column(
+                verticalArrangement = spacedBy(16.dp),
+            ) {
+                CommentCard(
+                    onClick = {},
+                    user = PreviewData.user1,
+                    comment = PreviewData.comment1.copy(userRating = 1, comment = "Lorem Ipsum"),
+                    replies = EmptyImmutableList,
+                    modifier = Modifier
+                        .height(TraktTheme.size.commentCardSize),
+                )
+                CommentCard(
+                    onClick = {},
+                    user = PreviewData.user1,
+                    comment = PreviewData.comment1.copy(userRating = 10, language = Locale.SIMPLIFIED_CHINESE),
+                    replies = listOf(PreviewData.comment1).toImmutableList(),
+                    modifier = Modifier
+                        .height(400.dp),
+                )
+                CommentCard(
+                    onClick = {},
+                    user = PreviewData.user1,
+                    comment = PreviewData.comment1.copy(language = Locale.SIMPLIFIED_CHINESE),
+                    translations = CommentTranslations(
+                        languages = OnDeviceLanguages.All,
+                        items = mapOf<Int, CommentTranslation>(
+                            PreviewData.comment1.id to CommentTranslation.Translated(
+                                text = "Translated on device.",
+                                source = PreviewData.comment1.commentNoSpoilers,
+                            ),
+                        ).toImmutableMap(),
+                    ),
+                    onTranslateClick = {},
+                    modifier = Modifier
+                        .height(TraktTheme.size.commentCardSize),
+                )
+                CommentCard(
+                    onClick = {},
+                    user = null,
+                    comment = PreviewData.comment1.copy(userRating = 8),
+                    replies = listOf(PreviewData.comment1).toImmutableList(),
+                    progressTotal = 10,
+                    modifier = Modifier
+                        .height(400.dp),
+                )
+                CommentCard(
+                    onClick = {},
+                    user = PreviewData.user1,
+                    comment = PreviewData.comment1.copy(
+                        gif = CommentGif(
+                            slug = "funny-cat",
+                            url = "https://example.com/gif.gif",
+                        ),
+                    ),
+                    replies = EmptyImmutableList,
+                )
+                CommentCard(
+                    onClick = {},
+                    user = PreviewData.user1,
+                    comment = PreviewData.comment1.copy(
+                        comment = "Your go to comfort TV",
+                        gif = CommentGif(
+                            slug = "funny-cat",
+                            url = "https://example.com/gif.gif",
+                        ),
+                    ),
+                    replies = EmptyImmutableList,
+                    gifLayout = CommentGifLayout.Side,
+                    modifier = Modifier
+                        .height(TraktTheme.size.commentCardSize)
+                        .aspectRatio(HorizontalImageAspectRatio),
+                )
+            }
+        }
+    }
+}

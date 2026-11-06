@@ -1,0 +1,3 @@
+Imported from https://github.com/trakt/trakt-android
+Commit: f6b8be7025582624746f8a783178cc4e95f666ba
+License: GPL-3.0 (see LICENSE)

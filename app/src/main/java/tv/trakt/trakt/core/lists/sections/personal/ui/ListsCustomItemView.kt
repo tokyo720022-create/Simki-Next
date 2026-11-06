@@ -1,0 +1,456 @@
+package tv.trakt.trakt.core.lists.sections.personal.ui
+
+import androidx.compose.foundation.layout.Arrangement.spacedBy
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import tv.trakt.trakt.common.helpers.extensions.DevicePreview
+import tv.trakt.trakt.common.helpers.extensions.nowUtc
+import tv.trakt.trakt.common.helpers.extensions.nowUtcInstant
+import tv.trakt.trakt.common.helpers.extensions.relativeDateString
+import tv.trakt.trakt.common.helpers.extensions.relativeDateTimeString
+import tv.trakt.trakt.common.helpers.extensions.rememberDurationFormat
+import tv.trakt.trakt.common.helpers.extensions.toLocal
+import tv.trakt.trakt.common.helpers.preview.PreviewData
+import tv.trakt.trakt.common.model.Episode
+import tv.trakt.trakt.common.model.Movie
+import tv.trakt.trakt.common.model.Show
+import tv.trakt.trakt.core.lists.model.CustomListItem
+import tv.trakt.trakt.core.lists.model.CustomListItem.EpisodeItem
+import tv.trakt.trakt.core.lists.model.CustomListItem.MovieItem
+import tv.trakt.trakt.core.lists.model.CustomListItem.SeasonItem
+import tv.trakt.trakt.core.lists.model.CustomListItem.ShowItem
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.mediacards.VerticalMediaCard
+import tv.trakt.trakt.ui.theme.TraktTheme
+import java.time.temporal.ChronoUnit.DAYS
+
+@Composable
+internal fun ListsCustomItemView(
+    item: CustomListItem,
+    modifier: Modifier = Modifier,
+    showMediaIcon: Boolean = false,
+    showMoreIcon: Boolean = false,
+    watched: Boolean = false,
+    watching: Boolean = false,
+    watchlist: Boolean = false,
+    onMovieClick: (Movie) -> Unit,
+    onShowClick: (Show) -> Unit,
+    onEpisodeClick: (Show, Episode) -> Unit,
+    onLongClick: (() -> Unit)?,
+) {
+    when (item) {
+        is ShowItem -> {
+            ShowItemView(
+                item = item,
+                watched = watched,
+                watching = watching,
+                watchlist = watchlist,
+                showMoreIcon = showMoreIcon,
+                onShowClick = onShowClick,
+                onLongClick = onLongClick ?: {},
+                showMediaIcon = showMediaIcon,
+                modifier = modifier,
+            )
+        }
+
+        is MovieItem -> {
+            MovieItemView(
+                item = item,
+                watched = watched,
+                watching = watching,
+                watchlist = watchlist,
+                showMoreIcon = showMoreIcon,
+                onMovieClick = onMovieClick,
+                onLongClick = onLongClick ?: {},
+                showMediaIcon = showMediaIcon,
+                modifier = modifier,
+            )
+        }
+
+        is SeasonItem -> {
+            SeasonItemView(
+                item = item,
+                onShowClick = onShowClick,
+                modifier = modifier,
+            )
+        }
+
+        is EpisodeItem -> {
+            EpisodeItemView(
+                item = item,
+                onEpisodeClick = {
+                    onEpisodeClick(item.show, item.episode)
+                },
+                modifier = modifier,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ShowItemView(
+    item: ShowItem,
+    watched: Boolean,
+    watching: Boolean,
+    watchlist: Boolean,
+    showMoreIcon: Boolean,
+    onShowClick: (Show) -> Unit,
+    onLongClick: () -> Unit,
+    showMediaIcon: Boolean,
+    modifier: Modifier,
+) {
+    val isReleased = item.show.rememberReleased()
+    VerticalMediaCard(
+        title = item.show.title,
+        watched = watched,
+        watching = watching,
+        watchlist = watchlist,
+        more = showMoreIcon,
+        imageUrl = item.images?.getPosterUrl(),
+        onClick = { onShowClick(item.show) },
+        onLongClick = onLongClick,
+        chipSpacing = 10.dp,
+        chipContent = { modifier ->
+            if (isReleased) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = spacedBy(4.dp),
+                    modifier = modifier,
+                ) {
+                    if (showMediaIcon) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_shows_off),
+                            contentDescription = null,
+                            tint = TraktTheme.colors.chipContent,
+                            modifier = Modifier
+                                .size(13.dp),
+                        )
+                    }
+
+                    val airedEpisodes = stringResource(
+                        R.string.tag_text_number_of_episodes,
+                        item.show.airedEpisodes,
+                    )
+
+                    val footerText = remember {
+                        buildString {
+                            item.show.releasedAt?.let {
+                                append(it.toLocal().year.toString())
+                            } ?: append("TBA")
+
+                            if (item.show.airedEpisodes > 0) {
+                                append(" • ")
+                                append(airedEpisodes)
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = footerText,
+                        style = TraktTheme.typography.cardTitle,
+                        color = TraktTheme.colors.textPrimary,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = spacedBy(4.dp),
+                    modifier = modifier,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_calendar_upcoming),
+                        contentDescription = null,
+                        tint = TraktTheme.colors.chipContent,
+                        modifier = Modifier.size(13.dp),
+                    )
+                    Text(
+                        text = item.show.releasedAt?.toLocal()?.relativeDateTimeString() ?: "",
+                        style = TraktTheme.typography.cardTitle,
+                        color = TraktTheme.colors.textPrimary,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        },
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun MovieItemView(
+    item: MovieItem,
+    watched: Boolean,
+    watching: Boolean,
+    watchlist: Boolean,
+    showMoreIcon: Boolean,
+    onMovieClick: (Movie) -> Unit,
+    onLongClick: () -> Unit,
+    showMediaIcon: Boolean,
+    modifier: Modifier,
+) {
+    val isReleased = remember(item.movie.released) {
+        item.movie.isReleased
+    }
+    VerticalMediaCard(
+        title = item.movie.title,
+        imageUrl = item.images?.getPosterUrl(),
+        watched = watched,
+        watching = watching,
+        watchlist = watchlist,
+        more = showMoreIcon,
+        onClick = { onMovieClick(item.movie) },
+        onLongClick = onLongClick,
+        chipSpacing = 10.dp,
+        chipContent = { modifier ->
+            if (isReleased) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = spacedBy(4.dp),
+                    modifier = modifier,
+                ) {
+                    if (showMediaIcon) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_movies_off),
+                            contentDescription = null,
+                            tint = TraktTheme.colors.chipContent,
+                            modifier = Modifier
+                                .size(13.dp)
+                                .graphicsLayer {
+                                    translationY = -(0.25).dp.toPx()
+                                },
+                        )
+                    }
+
+                    val runtime = rememberDurationFormat(item.movie.runtime?.inWholeMinutes)
+                    Text(
+                        text = remember {
+                            if (runtime != "N/A") {
+                                "${item.movie.year} • $runtime"
+                            } else {
+                                item.movie.year.toString()
+                            }
+                        },
+                        style = TraktTheme.typography.cardTitle,
+                        color = TraktTheme.colors.textPrimary,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = spacedBy(4.dp),
+                    modifier = modifier,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_calendar_upcoming),
+                        contentDescription = null,
+                        tint = TraktTheme.colors.chipContent,
+                        modifier = Modifier.size(13.dp),
+                    )
+                    Text(
+                        text = item.movie.released?.relativeDateString() ?: "TBA",
+                        style = TraktTheme.typography.cardTitle,
+                        color = TraktTheme.colors.textPrimary,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        },
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun SeasonItemView(
+    item: SeasonItem,
+    onShowClick: (Show) -> Unit,
+    modifier: Modifier,
+) {
+    val isReleased = remember(item.season.firstAired) {
+        item.season.firstAired?.isBefore(nowUtc()) ?: false
+    }
+    VerticalMediaCard(
+        title = stringResource(R.string.text_season_number, item.season.number),
+        watched = false,
+        watching = false,
+        watchlist = false,
+        more = false,
+        imageUrl = item.images?.getPosterUrl(),
+        onClick = { onShowClick(item.show) },
+        chipSpacing = 10.dp,
+        chipContent = { modifier ->
+            if (isReleased) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = spacedBy(4.dp),
+                    modifier = modifier,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_shows_off),
+                        contentDescription = null,
+                        tint = TraktTheme.colors.chipContent,
+                        modifier = Modifier
+                            .size(13.dp),
+                    )
+
+                    Text(
+                        text = stringResource(R.string.text_season_number, item.season.number),
+                        style = TraktTheme.typography.cardTitle,
+                        color = TraktTheme.colors.textPrimary,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = spacedBy(4.dp),
+                    modifier = modifier,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_calendar_upcoming),
+                        contentDescription = null,
+                        tint = TraktTheme.colors.chipContent,
+                        modifier = Modifier.size(13.dp),
+                    )
+                    Text(
+                        text = item.season.firstAired?.relativeDateTimeString() ?: "",
+                        style = TraktTheme.typography.cardTitle,
+                        color = TraktTheme.colors.textPrimary,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        },
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun EpisodeItemView(
+    item: EpisodeItem,
+    onEpisodeClick: (EpisodeItem) -> Unit,
+    modifier: Modifier,
+) {
+    val isReleased = item.episode.rememberReleased()
+    VerticalMediaCard(
+        title = item.show.title,
+        watched = false,
+        watching = false,
+        watchlist = false,
+        more = false,
+        imageUrl = item.show.images?.getPosterUrl(),
+        onClick = { onEpisodeClick(item) },
+        chipSpacing = 10.dp,
+        chipContent = { modifier ->
+            if (isReleased) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = spacedBy(4.dp),
+                    modifier = modifier,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_shows_off),
+                        contentDescription = null,
+                        tint = TraktTheme.colors.chipContent,
+                        modifier = Modifier
+                            .size(13.dp),
+                    )
+
+                    Text(
+                        text = item.episode.seasonEpisodeString(),
+                        style = TraktTheme.typography.cardTitle,
+                        color = TraktTheme.colors.textPrimary,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = spacedBy(4.dp),
+                    modifier = modifier,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_calendar_upcoming),
+                        contentDescription = null,
+                        tint = TraktTheme.colors.chipContent,
+                        modifier = Modifier.size(13.dp),
+                    )
+                    Text(
+                        text = item.episode.releasedAt?.toLocal()?.relativeDateTimeString() ?: "",
+                        style = TraktTheme.typography.cardTitle,
+                        color = TraktTheme.colors.textPrimary,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        },
+        modifier = modifier,
+    )
+}
+
+@DevicePreview
+@Composable
+private fun PreviewShow() {
+    TraktTheme {
+        ListsCustomItemView(
+            item = ShowItem(
+                itemId = 0,
+                rank = 0,
+                show = PreviewData.show1,
+                listedAt = nowUtcInstant().minus(3, DAYS),
+            ),
+            onMovieClick = { },
+            onShowClick = { },
+            onEpisodeClick = { _, _ -> },
+            onLongClick = { },
+        )
+    }
+}
+
+@DevicePreview
+@Composable
+private fun PreviewMovie() {
+    TraktTheme {
+        ListsCustomItemView(
+            item = MovieItem(
+                itemId = 0,
+                rank = 0,
+                movie = PreviewData.movie1,
+                listedAt = nowUtcInstant().minus(3, DAYS),
+            ),
+            onMovieClick = { },
+            onShowClick = { },
+            onEpisodeClick = { _, _ -> },
+            onLongClick = { },
+        )
+    }
+}

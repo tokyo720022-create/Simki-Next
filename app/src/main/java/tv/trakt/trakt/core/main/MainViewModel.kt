@@ -1,0 +1,551 @@
+@file:Suppress("UNCHECKED_CAST")
+
+package tv.trakt.trakt.core.main
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.google.android.play.core.appupdate.AppUpdateManager
+import com.google.android.play.core.ktx.AppUpdateResult
+import com.google.android.play.core.ktx.requestCompleteUpdate
+import com.google.android.play.core.ktx.requestUpdateFlow
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import timber.log.Timber
+import tv.trakt.trakt.common.auth.session.SessionManager
+import tv.trakt.trakt.common.core.user.usecases.lists.LoadUserListsUseCase
+import tv.trakt.trakt.common.core.user.usecases.lists.LoadUserWatchlistUseCase
+import tv.trakt.trakt.common.core.user.usecases.progress.LoadUserProgressUseCase
+import tv.trakt.trakt.common.firebase.analytics.Analytics
+import tv.trakt.trakt.common.firebase.inappreview.RequestAppReviewUseCase
+import tv.trakt.trakt.common.helpers.LoadingState
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.LoadingState.Loading
+import tv.trakt.trakt.common.helpers.errors.GlobalErrorsManager
+import tv.trakt.trakt.common.helpers.extensions.nowUtcInstant
+import tv.trakt.trakt.common.helpers.extensions.recordError
+import tv.trakt.trakt.common.helpers.extensions.rethrowCancellation
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.core.auth.ConfigAuth
+import tv.trakt.trakt.core.auth.model.AuthorizationException
+import tv.trakt.trakt.core.auth.model.toLoginFailureCode
+import tv.trakt.trakt.core.auth.usecase.AuthorizeUserUseCase
+import tv.trakt.trakt.core.auth.usecase.authCodeKey
+import tv.trakt.trakt.core.auth.usecase.authRedirectUriKey
+import tv.trakt.trakt.core.auth.usecase.codeVerifierKey
+import tv.trakt.trakt.core.auth.usecase.forceLoginKey
+import tv.trakt.trakt.core.checkin.data.CheckInManager
+import tv.trakt.trakt.core.checkin.model.CheckInState
+import tv.trakt.trakt.core.home.sections.monthreview.usecases.MonthReviewBannerUseCase
+import tv.trakt.trakt.core.main.usecases.DismissWelcomeUseCase
+import tv.trakt.trakt.core.main.usecases.InstallPromptUseCase
+import tv.trakt.trakt.core.main.usecases.YearInReviewBannerUseCase
+import tv.trakt.trakt.core.notifications.data.work.ScheduleNotificationsWorker
+import tv.trakt.trakt.core.notifications.data.work.mir.ScheduleMonthReviewNotificationWorker
+import tv.trakt.trakt.core.ratings.rateprompt.RatePromptManager
+import tv.trakt.trakt.core.ratings.rateprompt.model.RatePromptState
+import tv.trakt.trakt.core.user.usecases.LoadUserProfileUseCase
+import tv.trakt.trakt.core.user.usecases.LogoutUserUseCase
+import tv.trakt.trakt.core.user.usecases.ratings.LoadUserRatingsUseCase
+import tv.trakt.trakt.widgets.data.WidgetsUpdater
+import java.time.Instant
+import java.time.YearMonth
+import java.time.temporal.ChronoUnit.MINUTES
+import kotlin.time.Duration.Companion.milliseconds
+
+private const val MONTH_REVIEW_NOTIFICATION_SOURCE = "mir-notification"
+
+@OptIn(FlowPreview::class)
+internal class MainViewModel(
+    private val appContext: Context,
+    private val sessionManager: SessionManager,
+    private val checkInManager: CheckInManager,
+    private val ratePromptManager: RatePromptManager,
+    private val authorizePreferences: DataStore<Preferences>,
+    private val authorizeUseCase: AuthorizeUserUseCase,
+    private val getUserUseCase: LoadUserProfileUseCase,
+    private val logoutUseCase: LogoutUserUseCase,
+    private val loadUserProgressUseCase: LoadUserProgressUseCase,
+    private val loadUserWatchlistUseCase: LoadUserWatchlistUseCase,
+    private val loadUserListsUseCase: LoadUserListsUseCase,
+    private val loadUserRatingsUseCase: LoadUserRatingsUseCase,
+    private val dismissWelcomeUseCase: DismissWelcomeUseCase,
+    private val inAppReviewUseCase: RequestAppReviewUseCase,
+    private val installPromptUseCase: InstallPromptUseCase,
+    private val yearInReviewBannerUseCase: YearInReviewBannerUseCase,
+    private val monthReviewBannerUseCase: MonthReviewBannerUseCase,
+    private val inAppUpdateManager: AppUpdateManager,
+    private val errorsManager: GlobalErrorsManager,
+    private val widgetsUpdates: WidgetsUpdater,
+    private val analytics: Analytics,
+) : ViewModel() {
+    private val initialState = MainState()
+
+    private val userState = MutableStateFlow(initialState.user)
+    private val userVipState = MutableStateFlow(initialState.userVipStatus)
+    private val checkInState = MutableStateFlow(initialState.checkIn)
+    private val ratePromptState = MutableStateFlow(initialState.ratePrompt)
+    private val loadingUserState = MutableStateFlow(initialState.userLoading)
+    private val welcomeState = MutableStateFlow(initialState.welcome)
+    private val reviewState = MutableStateFlow(initialState.review)
+    private val installPromptState = MutableStateFlow(initialState.installPrompt)
+    private val yearInReviewState = MutableStateFlow(initialState.yearInReviewUrl)
+    private val paywallState = MutableStateFlow(initialState.paywall)
+    private val updateState = MutableStateFlow(initialState.update)
+    private val errorState = MutableStateFlow(initialState.error)
+
+    private var lastLoadTime: Instant? = null
+
+    init {
+        loadWelcome()
+        loadUser()
+        loadInstallPrompt()
+
+        observeInAppUpdate()
+        observeUser()
+        observeAuthCode()
+        observeCheckIn()
+        observeRatePrompt()
+        observeInAppReview()
+        observeErrors()
+    }
+
+    private fun observeUser() {
+        sessionManager.observeProfile()
+            .distinctUntilChanged()
+            .debounce(200.milliseconds)
+            .onEach { user ->
+                val currentUser = userState.value
+                userState.update { user }
+                userVipState.update { currentUser?.isVip to user?.isVip }
+                Timber.d("Observed user change: $user")
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun observeAuthCode() {
+        viewModelScope.launch {
+            authorizePreferences.data.collect { preferences ->
+                preferences[authCodeKey]?.let { code ->
+                    val codeVerifier = preferences[codeVerifierKey]
+                    val redirectUri = preferences[authRedirectUriKey] ?: ConfigAuth.OAUTH_REDIRECT_URI
+                    authorizePreferences.edit {
+                        it.remove(authCodeKey)
+                        it.remove(codeVerifierKey)
+                        it.remove(authRedirectUriKey)
+                        it.remove(forceLoginKey)
+                    }
+
+                    if (codeVerifier == null) {
+                        val error = IllegalStateException("Missing PKCE code verifier")
+                        analytics.logLoginFailed("missing_verifier")
+                        errorState.update { AuthorizationException(error) }
+                        Timber.recordError(error)
+                        return@collect
+                    }
+
+                    authorizeUser(code, codeVerifier, redirectUri)
+                }
+            }
+        }
+    }
+
+    private fun observeCheckIn() {
+        checkInManager.observe()
+            .distinctUntilChanged()
+            .debounce(200.milliseconds)
+            .onEach { state ->
+                checkInState.update { state }
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun observeRatePrompt() {
+        ratePromptManager.observe()
+            .distinctUntilChanged()
+            .debounce(50.milliseconds)
+            .onEach { state ->
+                ratePromptState.update { state }
+            }
+            .launchIn(viewModelScope)
+
+        ratePromptManager.observeLibraryChanges()
+            .launchIn(viewModelScope)
+    }
+
+    private fun observeInAppReview() {
+        inAppReviewUseCase.observeCount()
+            .distinctUntilChanged()
+            .filterNotNull()
+            .debounce(200.milliseconds)
+            .onEach {
+                reviewState.update {
+                    inAppReviewUseCase.shouldRequest()
+                }
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun observeInAppUpdate() {
+        inAppUpdateManager
+            .requestUpdateFlow()
+            .debounce(200.milliseconds)
+            .catch { error ->
+                // requestUpdateFlow throws InstallException when the API is unavailable
+                // (e.g. sideloaded builds). Swallow it; in-app updates simply stay off.
+                Timber.e(error, "In-app update flow unavailable")
+            }
+            .onEach { result ->
+                updateState.update { result }
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun observeErrors() {
+        errorsManager.observe()
+            .onEach { error ->
+                errorState.update { error }
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun loadUser() {
+        viewModelScope.launch {
+            try {
+                delay(500.milliseconds)
+                getUserUseCase.loadUserProfile()?.let {
+                    analytics.setUserId(it.ids.trakt.value.toString())
+                    analytics.setUserProperty("vip", it.isAnyVip.toString().lowercase())
+                    analytics.setUserProperty("director", it.isDirector.toString().lowercase())
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.e(error)
+                }
+            }
+        }
+    }
+
+    private fun loadWelcome() {
+        viewModelScope.launch {
+            val authenticatedAsync = async { sessionManager.isAuthenticated() }
+
+            val welcomeDismissedAsync = async { dismissWelcomeUseCase.isWelcomeDismissed() }
+            val onboardingDismissedAsync = async { dismissWelcomeUseCase.isOnboardingDismissed() }
+
+            val (authenticated, welcomeDismissed, onboardingDismissed) = awaitAll(
+                authenticatedAsync,
+                welcomeDismissedAsync,
+                onboardingDismissedAsync,
+            )
+
+            welcomeState.update {
+                MainState.WelcomeState(
+                    welcome = !authenticated && !welcomeDismissed,
+                    onboarding = !authenticated && !onboardingDismissed,
+                )
+            }
+        }
+    }
+
+    private fun loadInstallPrompt() {
+        viewModelScope.launch {
+            installPromptState.update {
+                installPromptUseCase.shouldPromptInstall()
+            }
+        }
+    }
+
+    private fun loadWidgets() {
+        widgetsUpdates.refreshInBackground()
+    }
+
+    fun loadData() {
+        if (lastLoadTime != null && nowUtcInstant().minus(1, MINUTES) < lastLoadTime) {
+            Timber.d("loadData(): skipping...")
+            return
+        }
+
+        viewModelScope.launch {
+            Timber.d("loadData(): loading data...")
+            try {
+                if (!sessionManager.isAuthenticated()) {
+                    return@launch
+                }
+
+                coroutineScope {
+                    val progressAsync = async { loadUserProgressUseCase.loadProgress() }
+                    val watchlistAsync = async { loadUserWatchlistUseCase.loadWatchlist() }
+                    val listsAsync = async { loadUserListsUseCase.loadLists() }
+                    val ratingsAsync = async { loadUserRatingsUseCase.loadAll() }
+
+                    awaitAll(
+                        progressAsync,
+                        watchlistAsync,
+                        listsAsync,
+                        ratingsAsync,
+                    )
+                }
+
+                loadRatePrompt()
+                loadWidgets()
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            } finally {
+                lastLoadTime = nowUtcInstant()
+            }
+        }
+    }
+
+    fun loadNotifications() {
+        ScheduleNotificationsWorker.schedule(
+            appContext = appContext,
+            forceRemote = true,
+        )
+        ScheduleMonthReviewNotificationWorker.schedule(
+            appContext = appContext,
+        )
+    }
+
+    fun openMonthReviewNotification(month: YearMonth) {
+        viewModelScope.launch {
+            try {
+                monthReviewBannerUseCase.dismissBanner(month.plusMonths(1).atDay(1))
+                analytics.logLink(
+                    source = MONTH_REVIEW_NOTIFICATION_SOURCE,
+                    target = "/users/me/mir/${month.year}/${month.monthValue}",
+                )
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    fun loadCheckIn() {
+        viewModelScope.launch {
+            try {
+                if (!sessionManager.isAuthenticated()) {
+                    return@launch
+                }
+                checkInManager.checkActive(appContext)
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    fun loadYearInReview() {
+        viewModelScope.launch {
+            try {
+                yearInReviewState.update {
+                    yearInReviewBannerUseCase.loadBannerUrl()
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    private fun loadRatePrompt() {
+        viewModelScope.launch {
+            try {
+                ratePromptManager.checkRecentlyWatched()
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    private fun authorizeUser(
+        code: String,
+        codeVerifier: String,
+        redirectUri: String,
+    ) {
+        viewModelScope.launch {
+            try {
+                loadingUserState.update { Loading }
+
+                dismissOnboarding()
+
+                authorizeUseCase.authorizeByCode(
+                    code = code,
+                    codeVerifier = codeVerifier,
+                    redirectUri = redirectUri,
+                )
+                getUserUseCase.loadUserProfile()?.let {
+                    analytics.setUserId(it.ids.trakt.value.toString())
+                    analytics.setUserProperty("vip", it.isAnyVip.toString().lowercase())
+                    analytics.setUserProperty("director", it.isDirector.toString().lowercase())
+                    analytics.logUserLogin(source = ConfigAuth.redirectSource(redirectUri))
+                    dismissPaywall(it)
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    analytics.logLoginFailed(error.toLoginFailureCode())
+                    logoutUser()
+                    errorState.update { AuthorizationException(error) }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingUserState.update { Done }
+            }
+        }
+    }
+
+    fun logoutUser() {
+        viewModelScope.launch {
+            try {
+                loadingUserState.update { Loading }
+                logoutUseCase.logoutUser()
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingUserState.update { Done }
+            }
+        }
+    }
+
+    suspend fun completeInAppUpdate() {
+        try {
+            inAppUpdateManager.requestCompleteUpdate()
+        } catch (error: Exception) {
+            error.rethrowCancellation {
+                Timber.recordError(error)
+            }
+        }
+    }
+
+    fun dismissWelcome() {
+        viewModelScope.launch {
+            welcomeState.update { it.copy(welcome = false) }
+            dismissWelcomeUseCase.dismissWelcome()
+        }
+    }
+
+    fun dismissCheckIn() {
+        viewModelScope.launch {
+            try {
+                checkInManager.stop(context = appContext)
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    fun dismissInstallPrompt() {
+        installPromptState.update { false }
+        viewModelScope.launch {
+            installPromptUseCase.markInstallPrompted()
+        }
+    }
+
+    fun dismissYearInReview() {
+        yearInReviewState.update { null }
+        viewModelScope.launch {
+            yearInReviewBannerUseCase.dismissBanner()
+        }
+    }
+
+    fun dismissInAppReview() {
+        reviewState.update { null }
+    }
+
+    private fun dismissOnboarding() {
+        viewModelScope.launch {
+            welcomeState.update { it.copy(onboarding = false) }
+            dismissWelcomeUseCase.dismissOnboarding()
+        }
+    }
+
+    private fun dismissPaywall(user: User) {
+        viewModelScope.launch {
+            if (user.isAnyVip) {
+                paywallState.update { false }
+            } else {
+                paywallState.update { true }
+            }
+        }
+    }
+
+    fun clearError() {
+        errorsManager.clear()
+    }
+
+    fun clearLoadingUser() {
+        loadingUserState.update { LoadingState.Idle }
+    }
+
+    fun clearInAppUpdate() {
+        updateState.update { null }
+    }
+
+    fun clearPaywall() {
+        paywallState.update { false }
+    }
+
+    val state = combine(
+        userState,
+        userVipState,
+        checkInState,
+        ratePromptState,
+        loadingUserState,
+        welcomeState,
+        reviewState,
+        installPromptState,
+        paywallState,
+        updateState,
+        errorState,
+        yearInReviewState,
+    ) { state ->
+        MainState(
+            user = state[0] as User?,
+            userVipStatus = state[1] as Pair<Boolean?, Boolean?>?,
+            checkIn = state[2] as CheckInState?,
+            ratePrompt = state[3] as RatePromptState?,
+            userLoading = state[4] as LoadingState,
+            welcome = state[5] as MainState.WelcomeState,
+            review = state[6] as Boolean?,
+            installPrompt = state[7] as Boolean,
+            paywall = state[8] as Boolean?,
+            update = state[9] as AppUpdateResult?,
+            error = state[10] as Exception?,
+            yearInReviewUrl = state[11] as String?,
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = initialState,
+    )
+}

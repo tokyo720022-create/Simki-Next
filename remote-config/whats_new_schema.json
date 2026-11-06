@@ -1,0 +1,78 @@
+[
+  {
+    "id": 31,
+    "version": "3.27.0",
+    "notes": [
+      {
+        "title": "Taste Match",
+        "text": "See how your taste compares with other members. Tap the match score on their profile to see your shared favorites and topics."
+      },
+      {
+        "title": "Sorting",
+        "text": "Sort Progress and Continue Watching by title, release date, rating and more with the new sort button."
+      },
+      {
+        "title": "Episode Lists",
+        "text": "Add episodes and seasons to your lists. Tap Manage lists in the episode menu, or the lists icon on the seasons screen."
+      },
+      {
+        "title": "Person Credits Details",
+        "text": "Tap Shows, Movies or From My History on a person page to browse all their credits, filtered by department."
+      }
+    ]
+  },
+  {
+    "id": 30,
+    "version": "3.26.0",
+    "notes": [
+      {
+        "title": "Monthly Calendar",
+        "text": "Switch the calendar to a monthly view with the toggle at the top. Tap any day to see what's releasing."
+      },
+      {
+        "title": "UI Refresh",
+        "text": "The app has a fresh new look with updated colors, icons and typography!"
+      },
+      {
+        "title": "Month in Review",
+        "text": "VIP members get a recap of last month on Home during the first week of each month. Tap it to see your stats."
+      }
+    ]
+  },
+  {
+    "id": 29,
+    "version": "3.25.0",
+    "notes": [
+      {
+        "title": "Monthly Calendar",
+        "text": "Switch the calendar to a monthly view with the toggle at the top. Tap any day to see what's releasing."
+      },
+      {
+        "title": "UI Refresh",
+        "text": "The app has a fresh new look with updated colors, icons and typography!"
+      },
+      {
+        "title": "Month in Review",
+        "text": "VIP members get a recap of last month on Home during the first week of each month. Tap it to see your stats."
+      }
+    ]
+  },
+  {
+    "id": 28,
+    "version": "3.24.1",
+    "notes": [
+      {
+        "title": "Today",
+        "text": "See what your friends watched, rated and commented on in the last 24 hours. Tap Today on Home and flip through it story by story."
+      },
+      {
+        "title": "Smart Lists",
+        "text": "Smart lists can now pull from All titles, your Watchlist or your Library, and mix shows and movies in one list."
+      },
+      {
+        "title": "Linked Details",
+        "text": "Person bios, trivia and sentiment summaries now link straight to the cast and crew they mention. Tap a name to jump to their page."
+      }
+    ]
+  }
+]

@@ -1,0 +1,234 @@
+package tv.trakt.trakt.core.home.di
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.SharedPreferencesMigration
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.preferencesDataStoreFile
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import org.koin.android.ext.koin.androidApplication
+import org.koin.core.module.dsl.bind
+import org.koin.core.module.dsl.factoryOf
+import org.koin.core.module.dsl.singleOf
+import org.koin.core.module.dsl.viewModel
+import org.koin.core.module.dsl.viewModelOf
+import org.koin.core.qualifier.named
+import org.koin.dsl.module
+import tv.trakt.trakt.common.model.activity.HomeActivityItem
+import tv.trakt.trakt.core.home.HomeViewModel
+import tv.trakt.trakt.core.home.sections.activity.data.local.personal.HomePersonalLocalSource
+import tv.trakt.trakt.core.home.sections.activity.features.all.personal.AllActivityPersonalViewModel
+import tv.trakt.trakt.core.home.sections.activity.features.all.social.AllActivitySocialViewModel
+import tv.trakt.trakt.core.home.sections.activity.features.history.HomeHistoryViewModel
+import tv.trakt.trakt.core.home.sections.activity.features.social.HomeSocialViewModel
+import tv.trakt.trakt.core.home.sections.activity.usecases.GetPersonalActivityUseCase
+import tv.trakt.trakt.core.home.sections.activity.usecases.GetSocialActivityUseCase
+import tv.trakt.trakt.core.home.sections.activity.usecases.RateActivityItemUseCase
+import tv.trakt.trakt.core.home.sections.activity.views.context.ActivityItemContextViewModel
+import tv.trakt.trakt.core.home.sections.monthreview.usecases.MonthReviewBannerUseCase
+import tv.trakt.trakt.core.home.sections.recommended.HomeRecommendedViewModel
+import tv.trakt.trakt.core.home.sections.recommended.data.media.RecommendedMediaLocalSource
+import tv.trakt.trakt.core.home.sections.recommended.usecase.media.GetRecommendedMediaUseCase
+import tv.trakt.trakt.core.home.sections.recommended.whythis.WhyThisViewModel
+import tv.trakt.trakt.core.home.sections.streaks.HomeStreaksViewModel
+import tv.trakt.trakt.core.home.sections.streaks.all.StreaksViewModel
+import tv.trakt.trakt.core.home.sections.streaks.data.DefaultStreaksManager
+import tv.trakt.trakt.core.home.sections.streaks.data.StreaksManager
+import tv.trakt.trakt.core.home.sections.upcoming.HomeUpcomingViewModel
+import tv.trakt.trakt.core.home.sections.upcoming.usecases.GetUpcomingUseCase
+import tv.trakt.trakt.core.home.sections.upnext.HomeUpNextViewModel
+import tv.trakt.trakt.core.home.sections.upnext.features.all.AllHomeUpNextViewModel
+import tv.trakt.trakt.core.home.sections.upnext.features.context.UpNextItemContextViewModel
+import tv.trakt.trakt.core.home.sections.upnext.usecases.DropPlaybackUseCase
+import tv.trakt.trakt.core.home.sections.upnext.usecases.GetUpNextUseCase
+import tv.trakt.trakt.core.home.sections.watchlist.HomeWatchlistViewModel
+import tv.trakt.trakt.core.home.sections.watchlist.features.all.AllHomeWatchlistViewModel
+import tv.trakt.trakt.core.home.sections.watchlist.usecases.AddHomeHistoryUseCase
+import tv.trakt.trakt.core.home.sections.watchlist.usecases.GetHomeMoviesWatchlistUseCase
+import tv.trakt.trakt.core.home.sections.watchlist.usecases.GetHomeShowsWatchlistUseCase
+import tv.trakt.trakt.core.home.sections.welcome.usecases.GetUserUsageUseCase
+
+internal const val HOME_PREFERENCES = "home_preferences_mobile"
+
+internal val homeDataModule = module {
+    singleOf(::HomePersonalLocalSource)
+    singleOf(::DefaultStreaksManager) { bind<StreaksManager>() }
+
+    single {
+        RecommendedMediaLocalSource(
+            dataStore = get(named(HOME_PREFERENCES)),
+        )
+    }
+
+    single<DataStore<Preferences>>(named(HOME_PREFERENCES)) {
+        createStore(
+            context = androidApplication(),
+        )
+    }
+}
+
+internal val homeModule = module {
+    factoryOf(::GetUpNextUseCase)
+    factoryOf(::DropPlaybackUseCase)
+    factoryOf(::GetHomeShowsWatchlistUseCase)
+    factoryOf(::GetHomeMoviesWatchlistUseCase)
+    factoryOf(::AddHomeHistoryUseCase)
+    factoryOf(::GetSocialActivityUseCase)
+    factoryOf(::GetPersonalActivityUseCase)
+    factoryOf(::RateActivityItemUseCase)
+    factoryOf(::GetUpcomingUseCase)
+    factoryOf(::GetUserUsageUseCase)
+    factoryOf(::GetRecommendedMediaUseCase)
+
+    factory {
+        MonthReviewBannerUseCase(
+            dataStore = get(named(HOME_PREFERENCES)),
+        )
+    }
+
+    viewModelOf(::HomeViewModel)
+    viewModelOf(::HomeSocialViewModel)
+    viewModelOf(::HomeHistoryViewModel)
+    viewModelOf(::AllActivityPersonalViewModel)
+    viewModelOf(::AllActivitySocialViewModel)
+    viewModel { (item: HomeActivityItem) ->
+        ActivityItemContextViewModel(
+            item = item,
+            updateMovieHistoryUseCase = get(),
+            updateEpisodeHistoryUseCase = get(),
+            updateMovieWatchlistUseCase = get(),
+            activityLocalSource = get(),
+            allActivityLocalSource = get(),
+            userWatchlistLocalSource = get(),
+            userWatchlistMinLocalSource = get(),
+            loadUserProgressUseCase = get(),
+            loadWatchlistUseCase = get(),
+            dataChanges = get(),
+            analytics = get(),
+        )
+    }
+    viewModelOf(::UpNextItemContextViewModel)
+    viewModelOf(::HomeStreaksViewModel)
+    viewModelOf(::StreaksViewModel)
+    viewModelOf(::WhyThisViewModel)
+
+    viewModel {
+        HomeUpNextViewModel(
+            appContext = androidApplication(),
+            getUpNextUseCase = get(),
+            updateHistoryUseCase = get(),
+            loadUserProgressUseCase = get(),
+            appReviewUseCase = get(),
+            homePersonalActivitySource = get(),
+            dataChanges = get(),
+            filterManager = get(),
+            sessionManager = get(),
+            collapsingManager = get(),
+            ratePromptManager = get(),
+            checkInManager = get(),
+            appLifecycleProvider = get(),
+            analytics = get(),
+        )
+    }
+
+    viewModel {
+        AllHomeUpNextViewModel(
+            appContext = androidApplication(),
+            getUpNextUseCase = get(),
+            updateHistoryUseCase = get(),
+            loadUserProgressUseCase = get(),
+            dataChanges = get(),
+            checkInManager = get(),
+            filterManager = get(),
+            sessionManager = get(),
+            analytics = get(),
+        )
+    }
+
+    viewModel {
+        HomeWatchlistViewModel(
+            appContext = androidApplication(),
+            getShowsUseCase = get(),
+            getMoviesUseCase = get(),
+            addHistoryUseCase = get(),
+            loadUserProgressUseCase = get(),
+            showLocalSource = get(),
+            movieLocalSource = get(),
+            userWatchlistMinSource = get(),
+            userWatchlistSource = get(),
+            filterManager = get(),
+            sessionManager = get(),
+            collapsingManager = get(),
+            checkInManager = get(),
+            ratePromptManager = get(),
+            dataChanges = get(),
+            appLifecycleProvider = get(),
+            analytics = get(),
+        )
+    }
+
+    viewModel {
+        AllHomeWatchlistViewModel(
+            appContext = androidApplication(),
+            getMoviesUseCase = get(),
+            getShowsUseCase = get(),
+            addHistoryUseCase = get(),
+            loadUserProgressUseCase = get(),
+            userWatchlistSource = get(),
+            userWatchlistMinSource = get(),
+            showLocalSource = get(),
+            movieLocalSource = get(),
+            filterManager = get(),
+            sessionManager = get(),
+            checkInManager = get(),
+            ratePromptManager = get(),
+            dataChanges = get(),
+            analytics = get(),
+        )
+    }
+
+    viewModel {
+        HomeUpcomingViewModel(
+            appContext = androidApplication(),
+            getUpcomingUseCase = get(),
+            getCalendarTypeUseCase = get(),
+            showLocalSource = get(),
+            episodeLocalSource = get(),
+            movieLocalSource = get(),
+            dataChanges = get(),
+            sessionManager = get(),
+            filterManager = get(),
+            collapsingManager = get(),
+            appLifecycleProvider = get(),
+        )
+    }
+
+    viewModel {
+        HomeRecommendedViewModel(
+            filterManager = get(),
+            collapsingManager = get(),
+            getRecommendedShowsUseCase = get(named("defaultRecommendedShowsUseCase")),
+            getRecommendedMoviesUseCase = get(named("defaultRecommendedMoviesUseCase")),
+            getRecommendedMediaUseCase = get(),
+            hideRecommendedShowUseCase = get(),
+            hideRecommendedMovieUseCase = get(),
+            appLifecycleProvider = get(),
+        )
+    }
+}
+
+private fun createStore(context: Context): DataStore<Preferences> {
+    return PreferenceDataStoreFactory.create(
+        corruptionHandler = ReplaceFileCorruptionHandler(
+            produceNewData = { emptyPreferences() },
+        ),
+        migrations = listOf(SharedPreferencesMigration(context, HOME_PREFERENCES)),
+        scope = CoroutineScope(Dispatchers.IO + SupervisorJob()),
+        produceFile = { context.preferencesDataStoreFile(HOME_PREFERENCES) },
+    )
+}

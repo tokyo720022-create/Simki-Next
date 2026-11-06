@@ -1,0 +1,58 @@
+package tv.trakt.trakt.app.core.details.movie.usecases.collection
+
+import tv.trakt.trakt.app.core.sync.data.local.movies.MoviesSyncLocalSource
+import tv.trakt.trakt.common.data.remote.MoviesSyncRemoteSource
+import tv.trakt.trakt.common.helpers.extensions.asyncMap
+import tv.trakt.trakt.common.helpers.extensions.toZonedDateTime
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.sorting.Sorting
+import tv.trakt.trakt.common.model.sync.WatchedMovie
+import tv.trakt.trakt.common.model.toTraktId
+
+internal class GetCollectionUseCase(
+    private val remoteSource: MoviesSyncRemoteSource,
+    private val syncLocalSource: MoviesSyncLocalSource,
+) {
+    suspend fun getWatchedMovie(
+        movieId: TraktId,
+        force: Boolean,
+    ): WatchedMovie? {
+        var localWatched = syncLocalSource.getWatched()
+        if (localWatched == null || force) {
+            val remoteWatched = remoteSource
+                .getWatched()
+                .map { (movieId, plays) ->
+                    WatchedMovie(
+                        movieId = movieId.toInt().toTraktId(),
+                        plays = plays.size,
+                        lastWatchedAt = plays.maxOf { it.toZonedDateTime() },
+                    )
+                }
+
+            syncLocalSource.saveWatched(remoteWatched, null)
+            localWatched = remoteWatched.associateBy { it.movieId }
+        }
+
+        return localWatched[movieId]
+    }
+
+    suspend fun getWatchlistMovie(
+        movieId: TraktId,
+        force: Boolean,
+    ): TraktId? {
+        var localWatchlist = syncLocalSource.getWatchlist()
+
+        if (localWatchlist == null || force) {
+            val remoteWatchlist = remoteSource
+                .getWatchlist(Sorting.RecentlyAdded)
+                .asyncMap { it.movie.ids.trakt.toTraktId() }
+                .toSet()
+
+            syncLocalSource.saveWatchlist(remoteWatchlist, null)
+            localWatchlist = remoteWatchlist.toSet()
+        }
+
+        return localWatchlist
+            .find { it.value == movieId.value }
+    }
+}

@@ -1,0 +1,329 @@
+package tv.trakt.trakt.ui.components.mediacards
+
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CardDefaults.cardColors
+import androidx.compose.material3.CardElevation
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import coil3.ColorImage
+import coil3.annotation.ExperimentalCoilApi
+import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePreviewHandler
+import coil3.compose.LocalAsyncImagePreviewHandler
+import coil3.request.ImageRequest
+import coil3.request.crossfade
+import tv.trakt.trakt.common.helpers.extensions.ifOrElse
+import tv.trakt.trakt.common.helpers.extensions.onClick
+import tv.trakt.trakt.common.helpers.extensions.onClickCombined
+import tv.trakt.trakt.helpers.extensions.TraktThemeLightDark
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.theme.TraktTheme
+import tv.trakt.trakt.ui.theme.VerticalImageAspectRatio
+
+@Composable
+internal fun VerticalMediaCard(
+    title: String,
+    imageUrl: String?,
+    modifier: Modifier = Modifier,
+    width: Dp = Dp.Unspecified,
+    corner: Dp = 15.dp,
+    elevation: CardElevation = CardDefaults.cardElevation(
+        defaultElevation = TraktTheme.colors.shadowDynamicSmall,
+        pressedElevation = TraktTheme.colors.shadowDynamicSmall,
+        disabledElevation = TraktTheme.colors.shadowDynamicSmall,
+    ),
+    enabled: Boolean = true,
+    more: Boolean = true,
+    blackWhite: Boolean = false,
+    watched: Boolean = false,
+    watching: Boolean = false,
+    watchlist: Boolean = false,
+    chipSpacing: Dp = 8.dp,
+    chipContent: @Composable (Modifier) -> Unit = {},
+    cardContent: @Composable (() -> Unit)? = null,
+    onClick: () -> Unit = {},
+    onLongClick: () -> Unit = {},
+) {
+    val cardWidth = when {
+        width != Dp.Unspecified -> width
+        else -> TraktTheme.size.verticalMediaCardSize
+    }
+
+    var isError by remember(imageUrl) { mutableStateOf(false) }
+
+    val animatedSaturation by animateFloatAsState(
+        targetValue = if (blackWhite) 0f else 1f,
+        animationSpec = tween(200),
+        label = "saturation",
+    )
+    val animatedAlpha by animateFloatAsState(
+        targetValue = if (blackWhite) 0.75f else 1f,
+        animationSpec = tween(200),
+        label = "alpha",
+    )
+
+    val animatedColorFilter = remember(animatedSaturation, blackWhite) {
+        if (animatedSaturation >= 0.99F) {
+            null // No filter when fully saturated
+        } else {
+            ColorFilter.colorMatrix(
+                ColorMatrix().apply {
+                    setToSaturation(animatedSaturation)
+                },
+            )
+        }
+    }
+
+    Column(
+        verticalArrangement = spacedBy(chipSpacing),
+        modifier = modifier
+            .widthIn(max = cardWidth),
+    ) {
+        Box {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(VerticalImageAspectRatio),
+                shape = RoundedCornerShape(corner),
+                elevation = elevation,
+                colors = cardColors(
+                    containerColor = TraktTheme.colors.placeholderContainer,
+                ),
+                content = {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .ifOrElse(
+                                condition = enabled,
+                                isTrue = Modifier
+                                    .onClickCombined(
+                                        onClick = onClick,
+                                        onLongClick = onLongClick,
+                                    ),
+                            ),
+                    ) {
+                        if (imageUrl != null && !isError) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(imageUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = "Card image",
+                                contentScale = ContentScale.Crop,
+                                colorFilter = animatedColorFilter,
+                                onError = { isError = true },
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .alpha(animatedAlpha),
+                            )
+                        } else {
+                            Image(
+                                painter = painterResource(R.drawable.ic_trakt_icon),
+                                contentDescription = title,
+                                contentScale = ContentScale.Fit,
+                                colorFilter = ColorFilter.tint(TraktTheme.colors.placeholderContent),
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .align(Alignment.Center),
+                            )
+
+                            Text(
+                                text = title.uppercase(),
+                                style = TraktTheme.typography.buttonTertiary,
+                                color = TraktTheme.colors.textPrimary,
+                                textAlign = TextAlign.Center,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(horizontal = 12.dp, vertical = 16.dp),
+                            )
+                        }
+
+                        if (more) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_more_vertical),
+                                contentDescription = null,
+                                tint = when {
+                                    imageUrl == null || isError -> TraktTheme.colors.textPrimary
+                                    else -> TraktTheme.colors.textPrimaryOnAccent
+                                },
+                                modifier = Modifier
+                                    .padding(
+                                        horizontal = 5.dp,
+                                        vertical = 10.dp,
+                                    )
+                                    .size(14.dp)
+                                    .align(Alignment.TopEnd)
+                                    .onClick(onClick = onLongClick),
+                            )
+                        }
+                    }
+                },
+            )
+
+            cardContent?.let {
+                Box(
+                    modifier = Modifier
+                        .padding(6.dp)
+                        .align(Alignment.BottomStart),
+                ) {
+                    cardContent()
+                }
+            }
+
+            if (watchlist || watched || watching) {
+                Row(
+                    horizontalArrangement = spacedBy(4.dp),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .graphicsLayer {
+                            translationY = 6.5.dp.toPx()
+                        },
+                ) {
+                    if (watched || watching) {
+                        CollectionChip(
+                            iconRes = R.drawable.ic_check_double,
+                            iconSize = 11.5.dp,
+                            halved = watching,
+                        )
+                    }
+
+                    if (watchlist) {
+                        CollectionChip(
+                            iconRes = R.drawable.ic_bookmark_on,
+                            iconSize = 11.5.dp,
+                        )
+                    }
+                }
+            }
+        }
+
+        chipContent(
+            Modifier.heightIn(min = 16.dp),
+        )
+    }
+}
+
+@Composable
+private fun CollectionChip(
+    iconRes: Int,
+    iconSize: Dp,
+    halved: Boolean = false,
+) {
+    val shape = RoundedCornerShape(100)
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(
+                width = 24.dp,
+                height = 16.dp,
+            )
+            .shadow(1.5.dp, shape)
+            .clip(shape)
+            .background(TraktTheme.colors.tagChipContainer),
+    ) {
+        if (halved) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(0.5f)
+                    .align(Alignment.CenterEnd)
+                    .background(TraktTheme.colors.tagChipContainerLight),
+            )
+        }
+        Icon(
+            painter = painterResource(iconRes),
+            tint = TraktTheme.colors.tagChipContent,
+            contentDescription = null,
+            modifier = Modifier.size(iconSize),
+        )
+    }
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@Preview
+@Composable
+private fun PosterPreview() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.Blue.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            VerticalMediaCard(
+                title = "Placeholder",
+                watched = true,
+                watchlist = true,
+                imageUrl = "https://image.tmdb.org/t/p/w600_and_h900_bestv2/4iWjGghUj2uyHo2Hyw8NFBvsNGm.jpg",
+                modifier = Modifier.padding(16.dp),
+            )
+        }
+    }
+}
+
+@Preview
+@Composable
+private fun PosterPreviewPlaceholder() {
+    TraktThemeLightDark {
+        VerticalMediaCard(
+            title = "Lorem",
+            imageUrl = null,
+            modifier = Modifier
+                .padding(16.dp),
+        )
+    }
+}
+
+@Preview
+@Composable
+private fun PosterPreviewError() {
+    TraktTheme {
+        VerticalMediaCard(
+            title = "Placeholder",
+            imageUrl = "https://example.com/not-a-poster.jpg",
+            modifier = Modifier.padding(16.dp),
+        )
+    }
+}

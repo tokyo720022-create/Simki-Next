@@ -1,0 +1,671 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
+package tv.trakt.trakt.core.main
+
+import android.app.Activity
+import android.content.Intent
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Alignment.Companion.BottomCenter
+import androidx.compose.ui.Alignment.Companion.TopCenter
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.graphics.Brush.Companion.verticalGradient
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.shadow.Shadow
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle.Event.ON_RESUME
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavDestination.Companion.hasRoute
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.rememberNavController
+import com.google.android.play.core.crossdeviceprompt.CrossDevicePromptManagerFactory
+import com.google.android.play.core.crossdeviceprompt.model.CrossDevicePromptInstallationRequest
+import com.google.android.play.core.install.model.AppUpdateType
+import com.google.android.play.core.ktx.AppUpdateResult.Available
+import com.google.android.play.core.ktx.AppUpdateResult.Downloaded
+import com.google.android.play.core.ktx.clientVersionStalenessDays
+import com.google.android.play.core.review.ReviewManagerFactory
+import com.google.android.play.core.review.testing.FakeReviewManager
+import com.jakewharton.processphoenix.ProcessPhoenix
+import kotlinx.coroutines.launch
+import timber.log.Timber
+import tv.trakt.trakt.LocalBottomBarVisibility
+import tv.trakt.trakt.LocalCheckInVisibility
+import tv.trakt.trakt.LocalSnackbarState
+import tv.trakt.trakt.LocalStartAuthorization
+import tv.trakt.trakt.app.BuildConfig
+import tv.trakt.trakt.common.helpers.LaunchedUpdateEffect
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.extensions.HTTP_ERROR_TRAKT_VIP_LIMIT
+import tv.trakt.trakt.common.helpers.extensions.getHttpCode
+import tv.trakt.trakt.common.model.Comment
+import tv.trakt.trakt.common.ui.composables.FilmProgressIndicator
+import tv.trakt.trakt.core.applinks.AppLinkViewModel
+import tv.trakt.trakt.core.auth.model.AuthorizationException
+import tv.trakt.trakt.core.auth.model.LoginSource
+import tv.trakt.trakt.core.billing.navigation.navigateToBilling
+import tv.trakt.trakt.core.checkin.model.CheckInState.ActiveEpisode
+import tv.trakt.trakt.core.checkin.model.CheckInState.ActiveMovie
+import tv.trakt.trakt.core.comments.features.details.CommentDetailsSheet
+import tv.trakt.trakt.core.comments.features.translation.download.CommentTranslationDownloadSheet
+import tv.trakt.trakt.core.discover.navigation.DiscoverDestination
+import tv.trakt.trakt.core.home.navigation.HomeDestination
+import tv.trakt.trakt.core.inreview.navigation.navigateToInReview
+import tv.trakt.trakt.core.inreview.rememberInReviewUriHandler
+import tv.trakt.trakt.core.lists.navigation.ListsDestination
+import tv.trakt.trakt.core.lists.sections.watchlist.features.all.navigation.navigateToWatchlist
+import tv.trakt.trakt.core.main.navigation.MainNavHost
+import tv.trakt.trakt.core.main.navigation.isMainDestination
+import tv.trakt.trakt.core.main.navigation.isStartDestination
+import tv.trakt.trakt.core.main.navigation.navigateToMainDestination
+import tv.trakt.trakt.core.main.ui.checkin.MainCheckInView
+import tv.trakt.trakt.core.main.ui.inputhold.MainInputHoldView
+import tv.trakt.trakt.core.main.ui.locked.LockedAccountView
+import tv.trakt.trakt.core.main.ui.menubar.TraktMenuBar
+import tv.trakt.trakt.core.main.ui.rateprompt.MainRatePromptView
+import tv.trakt.trakt.core.main.ui.seasonal.SeasonalSplashView
+import tv.trakt.trakt.core.main.ui.yir.MainYearInReviewView
+import tv.trakt.trakt.core.profile.navigation.ProfileDestination
+import tv.trakt.trakt.core.ratings.data.work.PostRatingException
+import tv.trakt.trakt.core.ratings.rateprompt.model.RatePromptMedia.MovieMedia
+import tv.trakt.trakt.core.ratings.rateprompt.model.RatePromptMedia.ShowMedia
+import tv.trakt.trakt.core.summary.episodes.navigation.navigateToEpisode
+import tv.trakt.trakt.core.summary.movies.navigation.navigateToMovie
+import tv.trakt.trakt.core.summary.shows.navigation.navigateToShow
+import tv.trakt.trakt.core.welcome.WelcomeScreen
+import tv.trakt.trakt.core.welcome.onboarding.OnboardingScreen
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.seasonal.SeasonalDecor
+import tv.trakt.trakt.ui.snackbar.MainSnackbarHost
+import tv.trakt.trakt.ui.theme.TraktTheme
+import tv.trakt.trakt.ui.theme.WithoutSeasonalTheme
+
+private const val IN_APP_UPDATE_REQUEST_CODE = 4001
+private const val IN_APP_UPDATE_STALENESS_DAYS = 7
+
+private val navigationBarShadowCapHeight = 48.dp
+private val navigationBarShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+
+@Composable
+internal fun MainScreen(
+    viewModel: MainViewModel,
+    appLinkViewModel: AppLinkViewModel,
+    modifier: Modifier = Modifier,
+    intent: Intent? = null,
+    newIntent: MutableState<Intent?>? = null,
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val appLinkState by appLinkViewModel.state.collectAsStateWithLifecycle()
+    var appLinkComment by remember { mutableStateOf<Comment?>(null) }
+
+    val scope = rememberCoroutineScope()
+    val localContext = LocalContext.current
+    val localRes = LocalResources.current
+    val localActivity = LocalActivity.current
+    val localSnackbar = LocalSnackbarState.current
+
+    val navController = rememberNavController()
+    val currentDestination = navController
+        .currentBackStackEntryFlow
+        .collectAsStateWithLifecycle(initialValue = null)
+
+    val searchState = rememberSearchState(currentDestination.value?.destination)
+    val inReviewUriHandler = rememberInReviewUriHandler(
+        slurm = state.user?.settings?.slurm,
+        onInReviewClick = navController::navigateToInReview,
+    )
+
+    LifecycleEventEffect(ON_RESUME) {
+        viewModel.loadData()
+        viewModel.loadCheckIn()
+        viewModel.loadNotifications()
+        viewModel.loadYearInReview()
+    }
+
+    LaunchedUpdateEffect(state.user) {
+        when {
+            state.user != null && state.userLoading == Done -> {
+                viewModel.clearLoadingUser()
+                localSnackbar.showSnackbar(
+                    message = localRes.getString(R.string.text_info_signed_in),
+                    duration = SnackbarDuration.Short,
+                )
+            }
+            state.user == null -> {
+                navController.navigateToMainDestination(HomeDestination)
+                localSnackbar.showSnackbar(
+                    message = localRes.getString(R.string.text_info_signed_out),
+                    duration = SnackbarDuration.Short,
+                )
+            }
+        }
+    }
+
+    LaunchedEffect(state.userVipStatus) {
+        with(state.userVipStatus) {
+            if (this == null || this.first == null || this.second == null) {
+                return@LaunchedEffect
+            }
+
+            if (this.first == true && this.second == false) {
+                localActivity?.let {
+                    ProcessPhoenix.triggerRebirth(it)
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(state.paywall) {
+        if (state.paywall == true) {
+            navController.navigateToBilling(source = "onboarding")
+            viewModel.clearPaywall()
+        }
+    }
+
+    LaunchedAppLinkEvents(
+        events = appLinkViewModel.events,
+        welcomeActive = state.welcome.isActive,
+        navController = navController,
+        onOpenComment = { appLinkComment = it },
+    )
+
+    CommentDetailsSheet(
+        comment = appLinkComment,
+        onDismiss = { appLinkComment = null },
+    )
+
+    CompositionLocalProvider(LocalUriHandler provides inReviewUriHandler) {
+        LaunchedIntentHandler(
+            intent = intent,
+            newIntent = newIntent?.value,
+            navController = navController,
+            currentDestination = currentDestination.value,
+            searchState = searchState,
+            onAppLink = appLinkViewModel::openAppLink,
+            onMonthReviewOpen = viewModel::openMonthReviewNotification,
+        )
+    }
+
+    LaunchedEffect(state.error) {
+        val error = state.error ?: return@LaunchedEffect
+        when {
+            error is AuthorizationException -> localSnackbar.showSnackbar(
+                message = localRes.getString(R.string.error_text_unexpected_error_short),
+            )
+            error is PostRatingException -> localSnackbar.showSnackbar(
+                message = localRes.getString(R.string.error_text_rating_not_saved),
+                duration = SnackbarDuration.Long,
+            )
+            error.getHttpCode() == HTTP_ERROR_TRAKT_VIP_LIMIT -> navController.navigateToBilling(source = "vip-limit")
+        }
+        viewModel.clearError()
+    }
+
+    LaunchedAppReview(
+        state = state,
+        onDismiss = viewModel::dismissInAppReview,
+    )
+
+    LaunchedAppUpdate(
+        state = state,
+        onCompleteUpdate = {
+            scope.launch {
+                viewModel.completeInAppUpdate()
+            }
+        },
+        onClearUpdate = viewModel::clearInAppUpdate,
+    )
+
+    LaunchedInstallPrompt(
+        state = state,
+        onPrompted = viewModel::dismissInstallPrompt,
+    )
+
+    val yearInReviewVisible = state.yearInReviewUrl != null &&
+        state.user != null &&
+        !state.welcome.isActive
+
+    CompositionLocalProvider(LocalUriHandler provides inReviewUriHandler) {
+        MainScreenContent(
+            modifier = modifier,
+            state = state,
+            searchState = searchState,
+            navController = navController,
+            currentDestination = currentDestination,
+            appLinkLoading = appLinkState.loading.isLoading,
+            onDismissWelcome = viewModel::dismissWelcome,
+            onDismissCheckIn = viewModel::dismissCheckIn,
+        )
+    }
+
+    SeasonalDecor()
+
+    SeasonalSplashView(
+        enabled = state.user != null && !state.welcome.isActive && !yearInReviewVisible,
+        onDismissed = {
+            navController.navigateToMainDestination(DiscoverDestination)
+        },
+    )
+
+    CompositionLocalProvider(LocalUriHandler provides inReviewUriHandler) {
+        MainYearInReviewView(
+            visible = yearInReviewVisible,
+            url = state.yearInReviewUrl,
+            onDismiss = viewModel::dismissYearInReview,
+        )
+    }
+
+    BackHandler(
+        enabled = !state.welcome.isActive && !yearInReviewVisible,
+    ) {
+        with(currentDestination.value?.destination) {
+            if (isStartDestination(this)) {
+                (localContext as? Activity)?.finish()
+                return@BackHandler
+            }
+            if (isMainDestination(this)) {
+                navController.navigateToMainDestination(HomeDestination)
+                return@BackHandler
+            }
+        }
+
+        navController.popBackStack()
+    }
+
+    BackHandler(
+        enabled = appLinkState.loading.isLoading,
+        onBack = appLinkViewModel::cancelAppLink,
+    )
+
+    BackHandler(
+        enabled = yearInReviewVisible,
+        onBack = viewModel::dismissYearInReview,
+    )
+
+    LockedAccountView()
+}
+
+@Composable
+private fun MainScreenContent(
+    modifier: Modifier,
+    state: MainState,
+    searchState: MainSearchStateHolder,
+    navController: NavHostController,
+    currentDestination: State<NavBackStackEntry?>,
+    appLinkLoading: Boolean,
+    onDismissWelcome: () -> Unit = {},
+    onDismissCheckIn: () -> Unit = {},
+) {
+    val localSnackbar = LocalSnackbarState.current
+    val localBottomBarVisibility = LocalBottomBarVisibility.current
+    val localCheckInVisibility = LocalCheckInVisibility.current
+    val startAuthorization = LocalStartAuthorization.current
+
+    Box(
+        modifier = modifier.fillMaxSize(),
+    ) {
+        Crossfade(
+            targetState = state.welcome,
+            animationSpec = tween(500),
+        ) { targetState ->
+            when {
+                targetState.welcome -> {
+                    WithoutSeasonalTheme {
+                        WelcomeScreen(
+                            onDismiss = onDismissWelcome,
+                        )
+                    }
+                }
+
+                targetState.onboarding -> {
+                    WithoutSeasonalTheme {
+                        OnboardingScreen(
+                            onLogin = startAuthorization,
+                        )
+                    }
+                }
+
+                else -> {
+                    MainNavHost(
+                        navController = navController,
+                        userId = state.user?.ids?.trakt,
+                        userLoading = state.userLoading.isLoading,
+                        searchInput = searchState.searchInput,
+                        onSearchLoading = searchState.onSearchLoading,
+                    )
+
+                    AnimatedVisibility(
+                        visible = localBottomBarVisibility.value,
+                        enter = fadeIn(tween(200)) + slideInVertically(initialOffsetY = { it / 2 }),
+                        exit = fadeOut(tween(200)) + slideOutVertically(targetOffsetY = { it / 2 }),
+                        modifier = Modifier.align(BottomCenter),
+                    ) {
+                        val lightColors = TraktTheme.colors.isLight
+                        val bottomColor = TraktTheme.colors.backgroundPrimary
+                        val bottomGradient = remember(localCheckInVisibility.value, lightColors) {
+                            when {
+                                localCheckInVisibility.value -> verticalGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        bottomColor.copy(alpha = 0.95F),
+                                        bottomColor,
+                                        bottomColor,
+                                    ),
+                                )
+                                else -> SolidColor(Color.Transparent)
+                            }
+                        }
+
+                        Column(
+                            verticalArrangement = spacedBy(6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth(TraktTheme.size.navigationBarRatio)
+                                .background(bottomGradient),
+                        ) {
+                            MainRatePromptView(
+                                state = state,
+                                onMediaClick = {
+                                    when (it) {
+                                        is MovieMedia -> navController.navigateToMovie(
+                                            movieId = it.movie.ids.trakt,
+                                        )
+                                        is ShowMedia -> navController.navigateToShow(
+                                            showId = it.show.ids.trakt,
+                                        )
+                                    }
+                                },
+                            )
+
+                            MainCheckInView(
+                                state = state,
+                                onMediaClick = {
+                                    when (val it = state.checkIn) {
+                                        is ActiveMovie -> navController.navigateToMovie(
+                                            movieId = it.movie.ids.trakt,
+                                        )
+                                        is ActiveEpisode -> navController.navigateToEpisode(
+                                            showId = it.show.ids.trakt,
+                                            episode = it.episode,
+                                        )
+                                        else -> Unit
+                                    }
+                                },
+                                onDismiss = onDismissCheckIn,
+                            )
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .imePadding(),
+                            ) {
+                                NavigationBarShadow(
+                                    modifier = Modifier
+                                        .align(TopCenter)
+                                        .fillMaxWidth(),
+                                )
+
+                                NavigationBar(
+                                    containerColor = TraktTheme.colors.navigationContainer,
+                                    contentColor = TraktTheme.colors.accent,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(navigationBarShape),
+                                ) {
+                                    TraktMenuBar(
+                                        currentDestination = currentDestination.value?.destination,
+                                        enabled = localBottomBarVisibility.value,
+                                        user = state.user,
+                                        searchState = searchState,
+                                        onSelected = {
+                                            if (state.user != null || it.destination == HomeDestination) {
+                                                navController.navigateToMainDestination(it.destination)
+                                            } else {
+                                                startAuthorization(LoginSource.Gated)
+                                            }
+                                        },
+                                        onProfileSelected = {
+                                            if (state.user != null) {
+                                                navController.navigateToMainDestination(ProfileDestination)
+                                            } else {
+                                                startAuthorization(LoginSource.Gated)
+                                            }
+                                        },
+                                        onReselected = {
+                                            currentDestination.value?.destination?.let {
+                                                if (it.hasRoute(ListsDestination::class) && state.user != null) {
+                                                    navController.navigateToWatchlist()
+                                                }
+                                            }
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    CommentTranslationDownloadSheet()
+
+                    MainSnackbarHost(
+                        snackbarHostState = localSnackbar,
+                        checkInVisible = state.checkIn?.isActive() == true,
+                        ratePromptVisible = state.ratePrompt?.isActive() == true,
+                    )
+
+                    MainInputHoldView(
+                        destination = currentDestination.value?.destination,
+                    )
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = appLinkLoading,
+            enter = fadeIn(tween(150)),
+            exit = fadeOut(tween(150)),
+        ) {
+            AppLinkLoadingMask()
+        }
+    }
+}
+
+@Composable
+private fun AppLinkLoadingMask() {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .fillMaxSize()
+            .background(TraktTheme.colors.backgroundPrimary.copy(alpha = 0.85F))
+            .clickable(
+                onClick = {},
+                indication = null,
+                interactionSource = null,
+            ),
+    ) {
+        FilmProgressIndicator(
+            color = TraktTheme.colors.textPrimary,
+        )
+    }
+}
+
+@Composable
+private fun LaunchedAppReview(
+    state: MainState,
+    onDismiss: () -> Unit,
+) {
+    val localActivity = LocalActivity.current
+
+    LaunchedEffect(state.review) {
+        if (state.review == true) {
+            onDismiss()
+            localActivity?.let { activity ->
+                val manager = when {
+                    BuildConfig.DEBUG -> FakeReviewManager(activity)
+                    else -> ReviewManagerFactory.create(activity)
+                }
+
+                manager
+                    .requestReviewFlow()
+                    .addOnCompleteListener { request ->
+                        if (request.isSuccessful) {
+                            val reviewInfo = request.result
+                            manager.launchReviewFlow(activity, reviewInfo)
+                            Timber.d("Review flow launched")
+                        } else {
+                            Timber.e("Review flow error: ${request.exception}")
+                        }
+                    }
+
+                Timber.d("Launching in-app review")
+            }
+        }
+    }
+}
+
+@Composable
+private fun LaunchedAppUpdate(
+    state: MainState,
+    onCompleteUpdate: () -> Unit,
+    onClearUpdate: () -> Unit,
+) {
+    val localRes = LocalResources.current
+    val localActivity = LocalActivity.current
+    val localSnackbar = LocalSnackbarState.current
+
+    var hasPromptedUpdate by rememberSaveable { mutableStateOf(false) }
+    var hasPromptedDownload by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(state.update) {
+        when (val update = state.update) {
+            is Available -> {
+                val updateInfo = update.updateInfo
+
+                val isStale = (updateInfo.clientVersionStalenessDays ?: -1) >= IN_APP_UPDATE_STALENESS_DAYS
+                val isAllowed = updateInfo.isUpdateTypeAllowed(AppUpdateType.FLEXIBLE)
+
+                if (isStale && isAllowed && !hasPromptedUpdate) {
+                    localActivity?.let { activity ->
+                        hasPromptedUpdate = true
+                        update.startFlexibleUpdate(activity, IN_APP_UPDATE_REQUEST_CODE)
+                    }
+                }
+            }
+            is Downloaded -> {
+                if (!hasPromptedDownload) {
+                    val result = localSnackbar.showSnackbar(
+                        message = localRes.getString(R.string.text_info_update_downloaded),
+                        actionLabel = localRes.getString(R.string.button_text_install),
+                        duration = SnackbarDuration.Indefinite,
+                    )
+
+                    if (result == SnackbarResult.ActionPerformed) {
+                        onCompleteUpdate()
+                    } else {
+                        onClearUpdate()
+                    }
+
+                    hasPromptedDownload = true
+                }
+            }
+            else -> {}
+        }
+    }
+}
+
+@Composable
+private fun NavigationBarShadow(modifier: Modifier = Modifier) {
+    val shadow = if (TraktTheme.colors.isLight) {
+        Shadow(
+            radius = 4.dp,
+            color = Color.Black,
+            spread = 2.dp,
+            alpha = 0.1F,
+        )
+    } else {
+        Shadow(
+            radius = 6.dp,
+            color = Color.Black,
+            spread = 2.dp,
+            alpha = 0.2F,
+        )
+    }
+    Box(
+        modifier = modifier
+            .height(navigationBarShadowCapHeight)
+            .dropShadow(
+                shape = navigationBarShape,
+                shadow = shadow,
+            ),
+    )
+}
+
+@Composable
+private fun LaunchedInstallPrompt(
+    state: MainState,
+    onPrompted: () -> Unit,
+) {
+    val localActivity = LocalActivity.current
+
+    var hasPromptedInstall by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(state.welcome, state.installPrompt) {
+        if (BuildConfig.DEBUG || !state.installPrompt || state.welcome.isActive || hasPromptedInstall) {
+            return@LaunchedEffect
+        }
+
+        val activity = localActivity ?: return@LaunchedEffect
+        hasPromptedInstall = true
+
+        with(CrossDevicePromptManagerFactory.create(activity)) {
+            requestInstallationPromptFlow(CrossDevicePromptInstallationRequest.create())
+                .addOnSuccessListener { info ->
+                    launchPromptFlow(activity, info)
+                    onPrompted()
+                    Timber.d("Cross-device install prompt launched")
+                }
+                .addOnFailureListener { error ->
+                    Timber.d("Cross-device install prompt not shown: %s", error.message)
+                }
+        }
+    }
+}

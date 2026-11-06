@@ -1,0 +1,250 @@
+@file:OptIn(FlowPreview::class)
+
+package tv.trakt.trakt.core.home.sections.activity.features.social
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import timber.log.Timber
+import tv.trakt.trakt.common.auth.session.SessionManager
+import tv.trakt.trakt.common.data.local.EpisodeLocalSource
+import tv.trakt.trakt.common.data.local.MovieLocalSource
+import tv.trakt.trakt.common.data.local.ShowLocalSource
+import tv.trakt.trakt.common.helpers.LoadingState
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.LoadingState.Loading
+import tv.trakt.trakt.common.helpers.extensions.EmptyImmutableList
+import tv.trakt.trakt.common.helpers.extensions.recordError
+import tv.trakt.trakt.common.helpers.extensions.rethrowCancellation
+import tv.trakt.trakt.common.model.Episode
+import tv.trakt.trakt.common.model.MediaMode
+import tv.trakt.trakt.common.model.Movie
+import tv.trakt.trakt.common.model.Show
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.common.model.activity.HomeActivityItem
+import tv.trakt.trakt.core.filters.data.GlobalFilterManager
+import tv.trakt.trakt.core.home.HomeConfig.HOME_SECTION_LIMIT
+import tv.trakt.trakt.core.home.sections.activity.usecases.GetSocialActivityUseCase
+import tv.trakt.trakt.helpers.collapsing.CollapsingManager
+import tv.trakt.trakt.helpers.collapsing.model.CollapsingKey
+
+internal class HomeSocialViewModel(
+    private val getSocialActivityUseCase: GetSocialActivityUseCase,
+    private val showLocalSource: ShowLocalSource,
+    private val episodeLocalSource: EpisodeLocalSource,
+    private val movieLocalSource: MovieLocalSource,
+    private val sessionManager: SessionManager,
+    private val filterManager: GlobalFilterManager,
+    private val collapsingManager: CollapsingManager,
+) : ViewModel() {
+    private val initialState = HomeSocialState()
+    private val initialMode = filterManager.getFilter()
+
+    private val userState = MutableStateFlow(initialState.user)
+    private val itemsState = MutableStateFlow(initialState.items)
+    private val filterState = MutableStateFlow(initialMode)
+    private val collapseState = MutableStateFlow(isCollapsed())
+    private val navigateShow = MutableStateFlow(initialState.navigateShow)
+    private val navigateEpisode = MutableStateFlow(initialState.navigateEpisode)
+    private val navigateMovie = MutableStateFlow(initialState.navigateMovie)
+    private val loadingState = MutableStateFlow(initialState.loading)
+    private val errorState = MutableStateFlow(initialState.error)
+
+    private var dataJob: Job? = null
+    private var processingJob: Job? = null
+    private var collapseJob: Job? = null
+
+    init {
+        loadData()
+        observeUser()
+        observeMode()
+    }
+
+    private fun observeUser() {
+        viewModelScope.launch {
+            userState.update { sessionManager.getProfile() }
+            sessionManager.observeProfile()
+                .drop(1)
+                .distinctUntilChanged()
+                .debounce(200)
+                .collect { user ->
+                    userState.update { user }
+                    loadData()
+                }
+        }
+    }
+
+    private fun observeMode() {
+        filterManager.observeFilter()
+            .distinctUntilChanged()
+            .onEach { value ->
+                filterState.update { value }
+                collapseState.update { isCollapsed() }
+                loadData()
+            }
+            .launchIn(viewModelScope)
+    }
+
+    fun loadData(ignoreErrors: Boolean = false) {
+        dataJob?.cancel()
+        dataJob = viewModelScope.launch {
+            try {
+                if (loadEmptyIfNeeded()) {
+                    return@launch
+                }
+
+                val localItems = getSocialActivityUseCase.getLocalSocialActivity(
+                    limit = HOME_SECTION_LIMIT,
+                    filter = filterState.value.mode,
+                )
+
+                if (localItems.isNotEmpty()) {
+                    itemsState.update { localItems }
+                    loadingState.update { Done }
+                } else {
+                    loadingState.update { Loading }
+                }
+
+                itemsState.update {
+                    getSocialActivityUseCase.getSocialActivity(
+                        page = 1,
+                        limit = HOME_SECTION_LIMIT,
+                        filters = filterState.value,
+                    )
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    if (!ignoreErrors) {
+                        errorState.update { error }
+                    }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingState.update { Done }
+                dataJob = null
+            }
+        }
+    }
+
+    private suspend fun loadEmptyIfNeeded(): Boolean {
+        if (!sessionManager.isAuthenticated()) {
+            itemsState.update { EmptyImmutableList }
+            loadingState.update { Done }
+            return true
+        }
+
+        return false
+    }
+
+    fun navigateToShow(show: Show) {
+        if (navigateShow.value != null || processingJob?.isActive == true) {
+            return
+        }
+        processingJob = viewModelScope.launch {
+            showLocalSource.upsertShows(listOf(show))
+            navigateShow.update { show.ids.trakt }
+        }
+    }
+
+    fun navigateToEpisode(
+        show: Show,
+        episode: Episode,
+    ) {
+        if (navigateEpisode.value != null || processingJob?.isActive == true) {
+            return
+        }
+        processingJob = viewModelScope.launch {
+            showLocalSource.upsertShows(listOf(show))
+            episodeLocalSource.upsertEpisodes(listOf(episode))
+
+            navigateEpisode.update {
+                Pair(show.ids.trakt, episode)
+            }
+        }
+    }
+
+    fun navigateToMovie(movie: Movie) {
+        if (navigateMovie.value != null || processingJob?.isActive == true) {
+            return
+        }
+        processingJob = viewModelScope.launch {
+            movieLocalSource.upsertMovies(listOf(movie))
+            navigateMovie.update { movie.ids.trakt }
+        }
+    }
+
+    fun clearNavigation() {
+        navigateShow.update { null }
+        navigateEpisode.update { null }
+        navigateMovie.update { null }
+    }
+
+    fun setCollapsed(collapsed: Boolean) {
+        collapseState.update { collapsed }
+
+        collapseJob?.cancel()
+        collapseJob = viewModelScope.launch {
+            val key = when (filterState.value.mode) {
+                MediaMode.Media -> CollapsingKey.HOME_MEDIA_SOCIAL
+                MediaMode.Shows -> CollapsingKey.HOME_SHOWS_SOCIAL
+                MediaMode.Movies -> CollapsingKey.HOME_MOVIES_SOCIAL
+            }
+            when {
+                collapsed -> collapsingManager.collapse(key)
+                else -> collapsingManager.expand(key)
+            }
+        }
+    }
+
+    private fun isCollapsed(): Boolean {
+        return collapsingManager.isCollapsed(
+            key = when (filterState.value.mode) {
+                MediaMode.Media -> CollapsingKey.HOME_MEDIA_SOCIAL
+                MediaMode.Shows -> CollapsingKey.HOME_SHOWS_SOCIAL
+                MediaMode.Movies -> CollapsingKey.HOME_MOVIES_SOCIAL
+            },
+        )
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    val state: StateFlow<HomeSocialState> = combine(
+        loadingState,
+        itemsState,
+        collapseState,
+        navigateShow,
+        navigateEpisode,
+        navigateMovie,
+        errorState,
+        userState,
+    ) { states ->
+        HomeSocialState(
+            loading = states[0] as LoadingState,
+            items = states[1] as? ImmutableList<HomeActivityItem>,
+            collapsed = states[2] as Boolean,
+            navigateShow = states[3] as? TraktId,
+            navigateEpisode = states[4] as? Pair<TraktId, Episode>,
+            navigateMovie = states[5] as? TraktId,
+            error = states[6] as? Exception,
+            user = states[7] as? User,
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = initialState,
+    )
+}

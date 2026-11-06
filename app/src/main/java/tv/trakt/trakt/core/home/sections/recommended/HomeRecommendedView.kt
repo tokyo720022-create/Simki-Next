@@ -1,0 +1,443 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
+package tv.trakt.trakt.core.home.sections.recommended
+
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Arrangement.spacedBy
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.SnackbarDuration.Long
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.google.firebase.Firebase
+import com.google.firebase.remoteconfig.remoteConfig
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
+import tv.trakt.trakt.LocalSnackbarState
+import tv.trakt.trakt.common.core.user.UserCollectionState
+import tv.trakt.trakt.common.firebase.FirebaseConfig.RemoteKey.MOBILE_EMPTY_IMAGE_5
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.LoadingState.Idle
+import tv.trakt.trakt.common.helpers.LoadingState.Loading
+import tv.trakt.trakt.common.helpers.extensions.EmptyImmutableList
+import tv.trakt.trakt.common.helpers.extensions.onClick
+import tv.trakt.trakt.common.helpers.extensions.rememberDurationFormat
+import tv.trakt.trakt.common.helpers.extensions.toLocal
+import tv.trakt.trakt.common.model.MediaMode
+import tv.trakt.trakt.common.model.MediaMode.Media
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.recommended.RecommendedItem
+import tv.trakt.trakt.common.model.recommended.RecommendedItem.MovieItem
+import tv.trakt.trakt.common.model.recommended.RecommendedItem.ShowItem
+import tv.trakt.trakt.core.home.sections.recommended.HomeRecommendedEvent.HideError
+import tv.trakt.trakt.core.home.sections.recommended.whythis.WhyThisSheet
+import tv.trakt.trakt.core.home.views.HomeEmptyView
+import tv.trakt.trakt.core.movies.ui.context.sheet.MovieContextSheet
+import tv.trakt.trakt.core.shows.ui.context.sheet.ShowContextSheet
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.TraktSectionHeader
+import tv.trakt.trakt.ui.components.mediacards.VerticalMediaCard
+import tv.trakt.trakt.ui.components.mediacards.skeletons.VerticalMediaSkeletonCard
+import tv.trakt.trakt.ui.theme.TraktTheme
+
+@Composable
+internal fun HomeRecommendedView(
+    modifier: Modifier = Modifier,
+    viewModel: HomeRecommendedViewModel,
+    headerPadding: PaddingValues,
+    contentPadding: PaddingValues,
+    collection: UserCollectionState,
+    onShowClick: (TraktId) -> Unit = {},
+    onMovieClick: (TraktId) -> Unit = {},
+    onMoreClick: () -> Unit = {},
+    onEmptyClick: () -> Unit = {},
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    val resources = LocalResources.current
+    val snackbar = LocalSnackbarState.current
+
+    var contextShowSheet by remember { mutableStateOf<ShowItem?>(null) }
+    var contextMovieSheet by remember { mutableStateOf<MovieItem?>(null) }
+    var whyThisItem by remember { mutableStateOf<RecommendedItem?>(null) }
+
+    LaunchedEffect(Unit) {
+        viewModel.events.collect { event ->
+            when (event) {
+                HideError -> snackbar.showSnackbar(
+                    message = resources.getString(R.string.error_text_unexpected_error_short),
+                    duration = Long,
+                )
+            }
+        }
+    }
+
+    HomeRecommendedContent(
+        state = state,
+        collectionState = collection,
+        modifier = modifier,
+        headerPadding = headerPadding,
+        contentPadding = contentPadding,
+        onCollapse = viewModel::setCollapsed,
+        onEmptyClick = onEmptyClick,
+        onMoreClick = {
+            if (!state.loading.isLoading) {
+                onMoreClick()
+            }
+        },
+        onClick = {
+            when (it) {
+                is ShowItem -> onShowClick(it.id)
+                is MovieItem -> onMovieClick(it.id)
+            }
+        },
+        onLongClick = {
+            if (state.loading.isLoading) {
+                return@HomeRecommendedContent
+            }
+            when (it) {
+                is ShowItem -> contextShowSheet = it
+                is MovieItem -> contextMovieSheet = it
+            }
+        },
+    )
+
+    ShowContextSheet(
+        show = contextShowSheet?.show,
+        showRecommended = true,
+        onHideRecommendation = { viewModel.hideRecommendation(it) },
+        onWhyThis = { whyThisItem = contextShowSheet },
+        onDismiss = { contextShowSheet = null },
+    )
+
+    MovieContextSheet(
+        movie = contextMovieSheet?.movie,
+        showRecommended = true,
+        onHideRecommendation = { viewModel.hideRecommendation(it) },
+        onWhyThis = { whyThisItem = contextMovieSheet },
+        onDismiss = { contextMovieSheet = null },
+    )
+
+    WhyThisSheet(
+        item = whyThisItem,
+        onDismiss = { whyThisItem = null },
+    )
+}
+
+@Composable
+internal fun HomeRecommendedContent(
+    state: HomeRecommendedState,
+    collectionState: UserCollectionState,
+    modifier: Modifier = Modifier,
+    headerPadding: PaddingValues = PaddingValues(),
+    contentPadding: PaddingValues = PaddingValues(),
+    onClick: (RecommendedItem) -> Unit = {},
+    onLongClick: (RecommendedItem) -> Unit = {},
+    onMoreClick: () -> Unit = {},
+    onEmptyClick: () -> Unit = {},
+    onCollapse: (collapsed: Boolean) -> Unit = {},
+) {
+    var animateCollapse by rememberSaveable { mutableStateOf(false) }
+
+    Column(
+        verticalArrangement = spacedBy(TraktTheme.spacing.mainRowHeaderSpace),
+        modifier = modifier
+            .animateContentSize(
+                animationSpec = if (animateCollapse) spring() else snap(),
+            ),
+    ) {
+        TraktSectionHeader(
+            title = stringResource(R.string.list_title_recommended),
+            collapsed = state.collapsed ?: false,
+            onCollapseClick = {
+                animateCollapse = true
+                val current = (state.collapsed ?: false)
+                onCollapse(!current)
+            },
+            modifier = Modifier
+                .padding(headerPadding)
+                .onClick(enabled = state.loading == Done) {
+                    onMoreClick()
+                },
+        )
+
+        if (state.collapsed != true) {
+            Crossfade(
+                targetState = state.loading,
+                animationSpec = tween(200),
+            ) { loading ->
+                when (loading) {
+                    Idle, Loading -> {
+                        ContentLoadingList(
+                            visible = loading.isLoading,
+                            contentPadding = contentPadding,
+                            modifier = Modifier.padding(bottom = 3.75.dp),
+                        )
+                    }
+
+                    Done -> {
+                        when {
+                            state.error != null -> {
+                                Text(
+                                    text = "${
+                                        stringResource(
+                                            R.string.error_text_unexpected_error_short,
+                                        )
+                                    }\n\n${state.error}",
+                                    color = TraktTheme.colors.textSecondary,
+                                    style = TraktTheme.typography.meta,
+                                    maxLines = 10,
+                                    modifier = Modifier.padding(contentPadding),
+                                )
+                            }
+
+                            state.items?.isEmpty() == true -> {
+                                val inspection = LocalInspectionMode.current
+                                val imageUrl = remember(inspection) {
+                                    when {
+                                        inspection -> null
+                                        else -> Firebase.remoteConfig.getString(MOBILE_EMPTY_IMAGE_5)
+                                    }
+                                }
+
+                                HomeEmptyView(
+                                    text = stringResource(R.string.text_cta_recommended),
+                                    icon = R.drawable.ic_empty_upnext,
+                                    buttonText = stringResource(R.string.link_text_discover_media),
+                                    backgroundImageUrl = imageUrl,
+                                    backgroundImage = when (imageUrl) {
+                                        null -> R.drawable.ic_splash_background_2
+                                        else -> null
+                                    },
+                                    onClick = onEmptyClick,
+                                    height = (226.25).dp,
+                                    modifier = Modifier
+                                        .padding(contentPadding)
+                                        .padding(bottom = 6.dp),
+                                )
+                            }
+
+                            else -> {
+                                ContentList(
+                                    mode = state.filter?.mode,
+                                    collection = collectionState,
+                                    listItems = (state.items ?: emptyList()).toImmutableList(),
+                                    contentPadding = contentPadding,
+                                    onClick = onClick,
+                                    onLongClick = onLongClick,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContentLoadingList(
+    modifier: Modifier = Modifier,
+    visible: Boolean = true,
+    contentPadding: PaddingValues,
+) {
+    LazyRow(
+        horizontalArrangement = spacedBy(TraktTheme.spacing.mainRowSpace),
+        contentPadding = contentPadding,
+        modifier = modifier
+            .fillMaxWidth()
+            .alpha(if (visible) 1F else 0F),
+    ) {
+        items(count = 12) {
+            VerticalMediaSkeletonCard(
+                chipRatio = 0.5F,
+                chipSpacing = 8.dp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ContentList(
+    mode: MediaMode?,
+    collection: UserCollectionState,
+    listState: LazyListState = rememberLazyListState(),
+    listItems: ImmutableList<RecommendedItem>,
+    contentPadding: PaddingValues,
+    onClick: (RecommendedItem) -> Unit,
+    onLongClick: (RecommendedItem) -> Unit,
+) {
+    val currentList = remember { mutableIntStateOf(listItems.hashCode()) }
+
+    LaunchedEffect(listItems) {
+        val hashCode = listItems.hashCode()
+        if (currentList.intValue != hashCode) {
+            currentList.intValue = hashCode
+            listState.animateScrollToItem(0)
+        }
+    }
+
+    LazyRow(
+        state = listState,
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = spacedBy(TraktTheme.spacing.mainRowSpace),
+        contentPadding = contentPadding,
+    ) {
+        items(
+            items = listItems,
+            key = { it.key },
+        ) { item ->
+            ContentListItem(
+                item = item,
+                mode = mode,
+                watched = collection.isWatched(item.id, item.type, item.airedEpisodes),
+                watching = collection.isWatching(item.id, item.type, item.airedEpisodes),
+                watchlist = collection.isWatchlist(item.id, item.type),
+                modifier = Modifier.animateItem(
+                    fadeInSpec = null,
+                    fadeOutSpec = null,
+                ),
+                onClick = { onClick(item) },
+                onLongClick = { onLongClick(item) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ContentListItem(
+    item: RecommendedItem,
+    mode: MediaMode?,
+    watched: Boolean,
+    watching: Boolean,
+    watchlist: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit = {},
+    onLongClick: () -> Unit = {},
+) {
+    VerticalMediaCard(
+        modifier = modifier,
+        title = item.title,
+        imageUrl = item.images?.getPosterUrl(),
+        watched = watched,
+        watching = watching,
+        watchlist = watchlist,
+        onClick = onClick,
+        onLongClick = onLongClick,
+        chipSpacing = 10.dp,
+        chipContent = { chipModifier ->
+            val footerText = when (item) {
+                is MovieItem -> {
+                    val runtime = rememberDurationFormat(item.movie.runtime?.inWholeMinutes)
+                    remember {
+                        if (runtime != "N/A") {
+                            "${item.movie.released?.year ?: item.movie.year}  •  $runtime"
+                        } else {
+                            "${item.movie.released?.year ?: item.movie.year}"
+                        }
+                    }
+                }
+
+                is ShowItem -> {
+                    val airedEpisodes = stringResource(
+                        R.string.tag_text_number_of_episodes,
+                        item.show.airedEpisodes,
+                    )
+                    remember {
+                        buildString {
+                            item.show.releasedAt?.let {
+                                append(it.toLocal().year.toString())
+                            } ?: append("TBA")
+
+                            if (item.show.airedEpisodes > 0) {
+                                append("  •  ")
+                                append(airedEpisodes)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = spacedBy(4.dp),
+                modifier = chipModifier.height(14.dp),
+            ) {
+                if (mode == Media) {
+                    Icon(
+                        painter = painterResource(item.icon),
+                        contentDescription = null,
+                        tint = TraktTheme.colors.chipContent,
+                        modifier = Modifier
+                            .size(13.dp)
+                            .graphicsLayer {
+                                translationY = (-0.25).dp.toPx()
+                            },
+                    )
+                }
+
+                Text(
+                    text = footerText,
+                    style = TraktTheme.typography.cardTitle,
+                    color = TraktTheme.colors.textPrimary,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        },
+    )
+}
+
+@Preview(
+    device = "id:pixel_5",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+)
+@Composable
+private fun Preview() {
+    TraktTheme {
+        HomeRecommendedContent(
+            state = HomeRecommendedState(
+                loading = Done,
+                items = EmptyImmutableList,
+            ),
+            collectionState = UserCollectionState.Default,
+        )
+    }
+}

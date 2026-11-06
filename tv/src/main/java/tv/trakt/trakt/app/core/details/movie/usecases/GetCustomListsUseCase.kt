@@ -1,0 +1,31 @@
+package tv.trakt.trakt.app.core.details.movie.usecases
+
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
+import tv.trakt.trakt.common.data.remote.MoviesRemoteSource
+import tv.trakt.trakt.common.helpers.extensions.asyncMap
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.lists.CustomList
+import tv.trakt.trakt.common.model.lists.CustomList.Type
+
+internal class GetCustomListsUseCase(
+    private val remoteSource: MoviesRemoteSource,
+) {
+    suspend fun getOfficialLists(movieId: TraktId): ImmutableList<CustomList> = getLists(movieId, Type.Official, 3)
+
+    suspend fun getPersonalLists(movieId: TraktId): ImmutableList<CustomList> = getLists(movieId, Type.Personal, 5)
+
+    private suspend fun getLists(
+        movieId: TraktId,
+        type: Type,
+        limit: Int,
+    ): ImmutableList<CustomList> {
+        return remoteSource.getLists(
+            movieId = movieId,
+            type = type.value,
+            limit = limit,
+        ).asyncMap {
+            CustomList.fromDto(it)
+        }.toImmutableList()
+    }
+}

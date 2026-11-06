@@ -1,0 +1,517 @@
+package tv.trakt.trakt.core.lists.sections.watchlist.features.all
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import timber.log.Timber
+import tv.trakt.trakt.common.auth.session.SessionManager
+import tv.trakt.trakt.common.core.lists.model.WatchlistItem
+import tv.trakt.trakt.common.core.lists.model.WatchlistItem.MovieItem
+import tv.trakt.trakt.common.core.sync.changes.ChangeOrigin
+import tv.trakt.trakt.common.core.sync.changes.DataChange.Kind
+import tv.trakt.trakt.common.core.sync.changes.DataChanges
+import tv.trakt.trakt.common.core.user.CollectionStateProvider
+import tv.trakt.trakt.common.core.user.UserCollectionState
+import tv.trakt.trakt.common.core.user.usecases.progress.LoadUserProgressUseCase
+import tv.trakt.trakt.common.data.local.MovieLocalSource
+import tv.trakt.trakt.common.data.local.ShowLocalSource
+import tv.trakt.trakt.common.firebase.analytics.Analytics
+import tv.trakt.trakt.common.firebase.analytics.logListSort
+import tv.trakt.trakt.common.helpers.DynamicStringResource
+import tv.trakt.trakt.common.helpers.LoadingState
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.LoadingState.Idle
+import tv.trakt.trakt.common.helpers.LoadingState.Loading
+import tv.trakt.trakt.common.helpers.StringResource
+import tv.trakt.trakt.common.helpers.extensions.EmptyImmutableList
+import tv.trakt.trakt.common.helpers.extensions.recordError
+import tv.trakt.trakt.common.helpers.extensions.rethrowCancellation
+import tv.trakt.trakt.common.model.DateSelectionResult
+import tv.trakt.trakt.common.model.MediaMode.Media
+import tv.trakt.trakt.common.model.MediaMode.Movies
+import tv.trakt.trakt.common.model.MediaMode.Shows
+import tv.trakt.trakt.common.model.Movie
+import tv.trakt.trakt.common.model.Show
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.common.model.globalfilter.GlobalFilter
+import tv.trakt.trakt.common.model.sorting.Sorting
+import tv.trakt.trakt.core.filters.data.GlobalFilterManager
+import tv.trakt.trakt.core.home.sections.watchlist.usecases.AddHomeHistoryUseCase
+import tv.trakt.trakt.core.lists.ListsConfig.WATCHLIST_PAGE_LIMIT
+import tv.trakt.trakt.core.lists.sections.watchlist.usecases.GetMoviesWatchlistUseCase
+import tv.trakt.trakt.core.lists.sections.watchlist.usecases.GetShowsWatchlistUseCase
+import tv.trakt.trakt.core.lists.sections.watchlist.usecases.GetWatchlistUseCase
+import tv.trakt.trakt.core.ratings.rateprompt.RatePromptManager
+import tv.trakt.trakt.core.user.usecases.ratings.LoadUserRatingsUseCase
+import tv.trakt.trakt.resources.R
+import kotlin.time.Duration.Companion.milliseconds
+
+@OptIn(FlowPreview::class)
+internal class AllWatchlistViewModel(
+    filterManager: GlobalFilterManager,
+    private val getWatchlistUseCase: GetWatchlistUseCase,
+    private val getShowsWatchlistUseCase: GetShowsWatchlistUseCase,
+    private val getMoviesWatchlistUseCase: GetMoviesWatchlistUseCase,
+    private val loadUserProgressUseCase: LoadUserProgressUseCase,
+    private val loadUserRatingsUseCase: LoadUserRatingsUseCase,
+    private val updateMovieHistoryUseCase: AddHomeHistoryUseCase,
+    private val collectionStateProvider: CollectionStateProvider,
+    private val showLocalSource: ShowLocalSource,
+    private val movieLocalSource: MovieLocalSource,
+    private val dataChanges: DataChanges,
+    private val sessionManager: SessionManager,
+    private val ratePromptManager: RatePromptManager,
+    private val analytics: Analytics,
+) : ViewModel() {
+    private val initialState = AllWatchlistState()
+    private val origin = ChangeOrigin.unique()
+    private val initialMode = filterManager.getFilter()
+
+    private val userState = MutableStateFlow(initialState.user)
+    private val itemsState = MutableStateFlow(initialState.items)
+    private val filterState = MutableStateFlow(initialMode)
+    private val sortingState = MutableStateFlow(initialState.sorting)
+    private val navigateShow = MutableStateFlow(initialState.navigateShow)
+    private val navigateMovie = MutableStateFlow(initialState.navigateMovie)
+    private val loadingState = MutableStateFlow(initialState.loading)
+    private val loadingMoreState = MutableStateFlow(initialState.loadingMore)
+    private val infoState = MutableStateFlow(initialState.info)
+    private val errorState = MutableStateFlow(initialState.error)
+
+    private var dataJob: Job? = null
+    private var processingJob: Job? = null
+    private var loadingJob: Job? = null
+
+    private var page: Int = 1
+    private var hasMoreData: Boolean = false
+
+    init {
+        loadUser()
+        loadInitialData()
+
+        observeData()
+        observeCollection()
+
+        analytics.logScreenView(
+            screenName = "all_watchlist",
+        )
+    }
+
+    private fun observeData() {
+        merge(
+            dataChanges.observe(Kind.History),
+            dataChanges.observe(Kind.Watchlist, exclude = origin),
+        )
+            .debounce(200.milliseconds)
+            .onEach {
+                loadData(ignoreErrors = true)
+            }.launchIn(viewModelScope)
+    }
+
+    private fun observeCollection() {
+        collectionStateProvider
+            .launchIn(viewModelScope)
+    }
+
+    fun loadUser() {
+        viewModelScope.launch {
+            try {
+                userState.update {
+                    sessionManager.getProfile()
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    private fun loadInitialData() {
+        dataJob?.cancel()
+        dataJob = viewModelScope.launch {
+            try {
+                if (loadEmptyIfNeeded()) return@launch
+                loadingIfNeeded()
+
+                val (showRatings, movieRatings) = loadUserRatingsUseCase.loadAllIfNeeded()
+                val items = when (filterState.value.mode) {
+                    Media -> getWatchlistUseCase.getRemoteWatchlist(
+                        page = page,
+                        limit = WATCHLIST_PAGE_LIMIT,
+                        filters = filterState.value,
+                        sorting = sortingState.value,
+                        showsRatings = showRatings,
+                        moviesRatings = movieRatings,
+                        skipLocal = true,
+                    )
+                    Shows -> getShowsWatchlistUseCase.getRemoteWatchlist(
+                        page = page,
+                        limit = WATCHLIST_PAGE_LIMIT,
+                        filters = filterState.value,
+                        sorting = sortingState.value,
+                        ratings = showRatings,
+                        skipLocal = true,
+                    )
+                    Movies -> getMoviesWatchlistUseCase.getRemoteWatchlist(
+                        page = page,
+                        limit = WATCHLIST_PAGE_LIMIT,
+                        filters = filterState.value,
+                        sorting = sortingState.value,
+                        ratings = movieRatings,
+                        skipLocal = true,
+                    )
+                }
+
+                itemsState
+                    .update { items }
+                    .also {
+                        hasMoreData = items.size >= WATCHLIST_PAGE_LIMIT
+                    }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingState.update { Done }
+                dataJob = null
+
+                loadingJob?.cancel()
+                loadingJob = null
+            }
+        }
+    }
+
+    private fun loadData(ignoreErrors: Boolean = false) {
+        dataJob?.cancel()
+        dataJob = viewModelScope.launch {
+            try {
+                loadingIfNeeded()
+
+                page = 1
+                hasMoreData = false
+
+                val (showsRatings, moviesRatings) = loadUserRatingsUseCase.loadAllIfNeeded()
+                val items = when (filterState.value.mode) {
+                    Media -> getWatchlistUseCase.getRemoteWatchlist(
+                        page = page,
+                        limit = WATCHLIST_PAGE_LIMIT,
+                        filters = filterState.value,
+                        sorting = sortingState.value,
+                        showsRatings = showsRatings,
+                        moviesRatings = moviesRatings,
+                        skipLocal = true,
+                    )
+                    Shows -> getShowsWatchlistUseCase.getRemoteWatchlist(
+                        page = page,
+                        limit = WATCHLIST_PAGE_LIMIT,
+                        filters = filterState.value,
+                        sorting = sortingState.value,
+                        ratings = showsRatings,
+                        skipLocal = true,
+                    )
+                    Movies -> getMoviesWatchlistUseCase.getRemoteWatchlist(
+                        page = page,
+                        limit = WATCHLIST_PAGE_LIMIT,
+                        filters = filterState.value,
+                        sorting = sortingState.value,
+                        ratings = moviesRatings,
+                        skipLocal = true,
+                    )
+                }
+
+                itemsState
+                    .update { items }
+                    .also {
+                        hasMoreData = items.size >= WATCHLIST_PAGE_LIMIT
+                    }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    if (!ignoreErrors) {
+                        errorState.update { error }
+                    }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingState.update { Done }
+                dataJob = null
+
+                loadingJob?.cancel()
+                loadingJob = null
+            }
+        }
+    }
+
+    fun loadMoreData() {
+        if (itemsState.value.isNullOrEmpty() || !hasMoreData) {
+            return
+        }
+        if (loadingMoreState.value.isLoading || loadingState.value.isLoading) {
+            return
+        }
+
+        dataJob = viewModelScope.launch {
+            try {
+                loadingMoreState.update { Loading }
+
+                val (showsRatings, moviesRatings) = loadUserRatingsUseCase.loadAllIfNeeded()
+
+                val nextPage = page + 1
+                val nextItems = when (filterState.value.mode) {
+                    Media -> getWatchlistUseCase.getRemoteWatchlist(
+                        page = nextPage,
+                        limit = WATCHLIST_PAGE_LIMIT,
+                        filters = filterState.value,
+                        sorting = sortingState.value,
+                        showsRatings = showsRatings,
+                        moviesRatings = moviesRatings,
+                        skipLocal = true,
+                    )
+                    Shows -> getShowsWatchlistUseCase.getRemoteWatchlist(
+                        page = nextPage,
+                        limit = WATCHLIST_PAGE_LIMIT,
+                        filters = filterState.value,
+                        sorting = sortingState.value,
+                        ratings = showsRatings,
+                        skipLocal = true,
+                    )
+                    Movies -> getMoviesWatchlistUseCase.getRemoteWatchlist(
+                        page = nextPage,
+                        limit = WATCHLIST_PAGE_LIMIT,
+                        filters = filterState.value,
+                        sorting = sortingState.value,
+                        ratings = moviesRatings,
+                        skipLocal = true,
+                    )
+                }
+
+                itemsState.update { items ->
+                    items
+                        ?.plus(nextItems)
+                        ?.distinctBy { it.key }
+                        ?.toImmutableList()
+                }
+
+                page = nextPage
+                hasMoreData = (nextItems.size >= WATCHLIST_PAGE_LIMIT)
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingMoreState.update { Done }
+                dataJob = null
+            }
+        }
+    }
+
+    private suspend fun loadEmptyIfNeeded(): Boolean {
+        if (!sessionManager.isAuthenticated()) {
+            itemsState.update { EmptyImmutableList }
+            loadingState.update { Done }
+            return true
+        } else {
+            itemsState.update { null }
+            loadingState.update { Idle }
+        }
+
+        return false
+    }
+
+    private fun CoroutineScope.loadingIfNeeded() {
+        loadingJob = launch {
+            if (itemsState.value?.isNotEmpty() == true) {
+                // Avoid blinking loading but still show it if loading takes too long
+                delay(100.milliseconds)
+            }
+            loadingState.update { Loading }
+        }
+    }
+
+    fun setFilter(newFilter: GlobalFilter) {
+        if (newFilter == filterState.value) {
+            return
+        }
+        filterState.update { newFilter }
+        loadData()
+    }
+
+    fun setSorting(newSorting: Sorting) {
+        if (newSorting == sortingState.value) {
+            return
+        }
+
+        loadingState.update { Loading }
+        sortingState.update {
+            it.copy(
+                type = newSorting.type,
+                order = newSorting.order,
+            )
+        }
+        analytics.lists.logListSort(newSorting)
+
+        loadData()
+    }
+
+    fun addMovieToHistory(
+        movieId: TraktId,
+        customDate: DateSelectionResult? = null,
+    ) {
+        if (processingJob != null) {
+            return
+        }
+        processingJob = viewModelScope.launch {
+            try {
+                val currentItems = itemsState.value?.toMutableList() ?: return@launch
+
+                val itemIndex = currentItems.indexOfFirst { it.id == movieId && (it is MovieItem) }
+                val itemLoading = (currentItems[itemIndex] as MovieItem).copy(loading = true)
+                currentItems[itemIndex] = itemLoading
+
+                itemsState.update {
+                    currentItems.toImmutableList()
+                }
+
+                updateMovieHistoryUseCase.addMovieToHistory(
+                    movieId = movieId,
+                    customDate = customDate,
+                )
+                removeItem(currentItems[itemIndex])
+
+                analytics.progress.logAddWatchedMedia(
+                    mediaType = "movie",
+                    source = "all_watchlist",
+                    date = customDate?.analyticsStrings,
+                )
+
+                infoState.update {
+                    DynamicStringResource(R.string.text_info_history_added)
+                }
+
+                loadUserProgress()
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.d(error, "Failed to add movie to history")
+                }
+            } finally {
+                processingJob = null
+            }
+        }
+    }
+
+    fun removeItem(item: WatchlistItem?) {
+        val currentItems = itemsState.value ?: return
+
+        itemsState.update {
+            currentItems
+                .filterNot {
+                    it.id == item?.id &&
+                        it.type == item.type
+                }
+                .toImmutableList()
+        }
+
+        dataChanges.notify(Kind.Watchlist, origin = origin)
+    }
+
+    fun loadUserProgress() {
+        viewModelScope.launch {
+            try {
+                loadUserProgressUseCase.loadMoviesProgress()
+                ratePromptManager.checkRecentlyWatched()
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    fun navigateToShow(show: Show) {
+        if (navigateShow.value != null || processingJob?.isActive == true) {
+            return
+        }
+        processingJob = viewModelScope.launch {
+            showLocalSource.upsertShows(listOf(show))
+            navigateShow.update { show.ids.trakt }
+        }
+    }
+
+    fun navigateToMovie(movie: Movie) {
+        if (navigateMovie.value != null || processingJob?.isActive == true) {
+            return
+        }
+        processingJob = viewModelScope.launch {
+            movieLocalSource.upsertMovies(listOf(movie))
+            navigateMovie.update { movie.ids.trakt }
+        }
+    }
+
+    fun clearNavigation() {
+        navigateShow.update { null }
+        navigateMovie.update { null }
+    }
+
+    fun clearInfo() {
+        infoState.update { null }
+    }
+
+    override fun onCleared() {
+        dataJob?.cancel()
+        dataJob = null
+        processingJob?.cancel()
+        processingJob = null
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    val state = combine(
+        loadingState,
+        loadingMoreState,
+        itemsState,
+        filterState,
+        sortingState,
+        collectionStateProvider.stateFlow,
+        navigateShow,
+        navigateMovie,
+        userState,
+        infoState,
+        errorState,
+    ) { state ->
+        AllWatchlistState(
+            loading = state[0] as LoadingState,
+            loadingMore = state[1] as LoadingState,
+            items = state[2] as? ImmutableList<WatchlistItem>,
+            filter = state[3] as? GlobalFilter,
+            sorting = state[4] as Sorting,
+            collection = state[5] as UserCollectionState,
+            navigateShow = state[6] as? TraktId,
+            navigateMovie = state[7] as? TraktId,
+            user = state[8] as? User,
+            info = state[9] as? StringResource,
+            error = state[10] as? Exception,
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = initialState,
+    )
+}

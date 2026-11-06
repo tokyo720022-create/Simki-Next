@@ -1,0 +1,70 @@
+package tv.trakt.trakt.app.core.streamings.navigation
+
+import androidx.navigation.NavController
+import androidx.navigation.NavGraphBuilder
+import androidx.navigation.compose.composable
+import kotlinx.serialization.Serializable
+import org.koin.compose.viewmodel.koinViewModel
+import tv.trakt.trakt.app.core.streamings.AllStreamingsScreen
+import tv.trakt.trakt.common.model.MediaType
+import tv.trakt.trakt.common.model.SeasonEpisode
+import tv.trakt.trakt.common.model.TraktId
+
+@Serializable
+internal data class AllStreamingsDestination(
+    val mediaId: Int,
+    val mediaType: MediaType,
+    val season: Int? = null,
+    val episode: Int? = null,
+    val checkYouTubeSpecial: Boolean = false,
+) {
+    init {
+        require(mediaType != MediaType.Season) {
+            "Unsupported media type: $mediaType"
+        }
+    }
+}
+
+internal fun NavGraphBuilder.allStreamingsScreen() {
+    composable<AllStreamingsDestination> {
+        AllStreamingsScreen(
+            viewModel = koinViewModel(),
+        )
+    }
+}
+
+internal fun NavController.navigateToShowStreamings(mediaId: TraktId) {
+    navigate(
+        route = AllStreamingsDestination(
+            mediaId = mediaId.value,
+            mediaType = MediaType.Show,
+        ),
+    )
+}
+
+internal fun NavController.navigateToMovieStreamings(
+    mediaId: TraktId,
+    checkYouTubeSpecial: Boolean,
+) {
+    navigate(
+        route = AllStreamingsDestination(
+            mediaId = mediaId.value,
+            mediaType = MediaType.Movie,
+            checkYouTubeSpecial = checkYouTubeSpecial,
+        ),
+    )
+}
+
+internal fun NavController.navigateToEpisodeStreamings(
+    mediaId: TraktId,
+    seasonEpisode: SeasonEpisode,
+) {
+    navigate(
+        route = AllStreamingsDestination(
+            mediaId = mediaId.value,
+            mediaType = MediaType.Episode,
+            season = seasonEpisode.season,
+            episode = seasonEpisode.episode,
+        ),
+    )
+}

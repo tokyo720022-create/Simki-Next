@@ -1,0 +1,363 @@
+@file:OptIn(FlowPreview::class)
+
+package tv.trakt.trakt.core.home.sections.activity.features.history
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableMap
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.collections.immutable.toImmutableMap
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import timber.log.Timber
+import tv.trakt.trakt.common.auth.session.SessionManager
+import tv.trakt.trakt.common.core.sync.changes.DataChange.Kind
+import tv.trakt.trakt.common.core.sync.changes.DataChanges
+import tv.trakt.trakt.common.data.local.AllActivityLocalSource
+import tv.trakt.trakt.common.data.local.EpisodeLocalSource
+import tv.trakt.trakt.common.data.local.MovieLocalSource
+import tv.trakt.trakt.common.data.local.ShowLocalSource
+import tv.trakt.trakt.common.helpers.LoadingState
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.LoadingState.Loading
+import tv.trakt.trakt.common.helpers.extensions.recordError
+import tv.trakt.trakt.common.helpers.extensions.rethrowCancellation
+import tv.trakt.trakt.common.helpers.lifecycle.AppLifecycleProvider
+import tv.trakt.trakt.common.helpers.lifecycle.observeForegroundRefresh
+import tv.trakt.trakt.common.model.Episode
+import tv.trakt.trakt.common.model.MediaMode
+import tv.trakt.trakt.common.model.Movie
+import tv.trakt.trakt.common.model.Show
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.common.model.activity.HomeActivityItem
+import tv.trakt.trakt.common.model.ratings.UserRating
+import tv.trakt.trakt.core.filters.data.GlobalFilterManager
+import tv.trakt.trakt.core.home.HomeConfig.HOME_SECTION_LIMIT
+import tv.trakt.trakt.core.home.sections.activity.usecases.GetPersonalActivityUseCase
+import tv.trakt.trakt.core.home.sections.activity.usecases.RateActivityItemUseCase
+import tv.trakt.trakt.core.user.usecases.ratings.LoadUserRatingsUseCase
+import tv.trakt.trakt.helpers.collapsing.CollapsingManager
+import tv.trakt.trakt.helpers.collapsing.model.CollapsingKey
+import kotlin.time.Duration.Companion.milliseconds
+
+internal class HomeHistoryViewModel(
+    private val getPersonalActivityUseCase: GetPersonalActivityUseCase,
+    private val rateActivityItemUseCase: RateActivityItemUseCase,
+    private val userRatingsUseCase: LoadUserRatingsUseCase,
+    private val allActivitySource: AllActivityLocalSource,
+    private val showLocalSource: ShowLocalSource,
+    private val movieLocalSource: MovieLocalSource,
+    private val episodeLocalSource: EpisodeLocalSource,
+    private val dataChanges: DataChanges,
+    private val sessionManager: SessionManager,
+    private val filterManager: GlobalFilterManager,
+    private val collapsingManager: CollapsingManager,
+    private val appLifecycleProvider: AppLifecycleProvider,
+) : ViewModel() {
+    private val initialState = HomeHistoryState()
+
+    private val userState = MutableStateFlow(initialState.user)
+    private val itemsState = MutableStateFlow(initialState.items)
+    private val itemsRatingsState = MutableStateFlow(initialState.itemsRatings)
+    private val filterState = MutableStateFlow(filterManager.getFilter())
+    private val collapseState = MutableStateFlow(isCollapsed())
+    private val navigateShow = MutableStateFlow(initialState.navigateShow)
+    private val navigateEpisode = MutableStateFlow(initialState.navigateEpisode)
+    private val navigateMovie = MutableStateFlow(initialState.navigateMovie)
+    private val loadingState = MutableStateFlow(initialState.loading)
+    private val errorState = MutableStateFlow(initialState.error)
+
+    private var dataJob: Job? = null
+    private var processingJob: Job? = null
+    private var collapseJob: Job? = null
+    private var ratingJob: Job? = null
+
+    init {
+        loadData()
+        loadUserRatingData()
+
+        observeUser()
+        observeUpdates()
+        observeRatings()
+        observeFilter()
+        observeForeground()
+    }
+
+    private fun observeForeground() {
+        appLifecycleProvider.observeForegroundRefresh()
+            .onEach { loadData(ignoreErrors = true) }
+            .launchIn(viewModelScope)
+    }
+
+    private fun observeFilter() {
+        filterManager.observeFilter()
+            .distinctUntilChanged()
+            .onEach { value ->
+                filterState.update { value }
+                collapseState.update { isCollapsed() }
+                loadData()
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun observeUser() {
+        viewModelScope.launch {
+            userState.update { sessionManager.getProfile() }
+            sessionManager.observeProfile()
+                .drop(1)
+                .distinctUntilChanged()
+                .debounce(200.milliseconds)
+                .collect { user ->
+                    userState.update { user }
+                    loadData()
+                }
+        }
+    }
+
+    private fun observeUpdates() {
+        merge(
+            dataChanges.observe(Kind.History, Kind.Watchlist, Kind.CheckIn),
+            allActivitySource.observeUpdates(),
+        )
+            .debounce(200.milliseconds)
+            .onEach { loadData(ignoreErrors = true) }
+            .launchIn(viewModelScope)
+    }
+
+    private fun observeRatings() {
+        dataChanges.observe(Kind.Ratings)
+            .debounce(200.milliseconds)
+            .onEach {
+                loadUserRatingData(ignoreErrors = true)
+            }.launchIn(viewModelScope)
+    }
+
+    fun loadData(ignoreErrors: Boolean = false) {
+        dataJob?.cancel()
+        dataJob = viewModelScope.launch {
+            try {
+                if (loadEmptyIfNeeded()) {
+                    return@launch
+                }
+
+                val localItems = getPersonalActivityUseCase.getLocalPersonalActivity(
+                    limit = HOME_SECTION_LIMIT,
+                    filter = filterState.value.mode,
+                )
+
+                if (localItems.isNotEmpty()) {
+                    itemsState.update { localItems }
+                    loadingState.update { Done }
+                } else {
+                    loadingState.update { Loading }
+                }
+
+                itemsState.update {
+                    getPersonalActivityUseCase.getPersonalActivity(
+                        page = 1,
+                        limit = HOME_SECTION_LIMIT,
+                        filter = filterState.value,
+                    )
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    if (!ignoreErrors) {
+                        errorState.update { error }
+                    }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingState.update { Done }
+                dataJob = null
+            }
+        }
+    }
+
+    private fun loadUserRatingData(ignoreErrors: Boolean = false) {
+        viewModelScope.launch {
+            if (!sessionManager.isAuthenticated()) {
+                return@launch
+            }
+
+            try {
+                coroutineScope {
+                    val moviesAsync = async {
+                        if (!userRatingsUseCase.isMoviesLoaded()) {
+                            userRatingsUseCase.loadMovies()
+                        }
+                    }
+
+                    val episodesAsync = async {
+                        if (!userRatingsUseCase.isEpisodesLoaded()) {
+                            userRatingsUseCase.loadEpisodes()
+                        }
+                    }
+
+                    episodesAsync.await()
+                    moviesAsync.await()
+                }
+
+                val userMovieRatings = userRatingsUseCase.loadLocalMovies()
+                val userEpisodesRatings = userRatingsUseCase.loadLocalEpisodes()
+
+                itemsRatingsState.update {
+                    (userMovieRatings + userEpisodesRatings)
+                        .mapKeys { it.value.key }
+                        .toImmutableMap()
+                }
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    if (!ignoreErrors) {
+                        errorState.update { error }
+                    }
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    private suspend fun loadEmptyIfNeeded(): Boolean {
+        if (!sessionManager.isAuthenticated()) {
+            itemsState.update {
+                emptyList<HomeActivityItem>().toImmutableList()
+            }
+            loadingState.update { Done }
+            return true
+        }
+
+        return false
+    }
+
+    fun navigateToShow(show: Show) {
+        if (navigateShow.value != null || processingJob?.isActive == true) {
+            return
+        }
+        processingJob = viewModelScope.launch {
+            showLocalSource.upsertShows(listOf(show))
+            navigateShow.update { show.ids.trakt }
+        }
+    }
+
+    fun navigateToEpisode(
+        show: Show,
+        episode: Episode,
+    ) {
+        if (navigateEpisode.value != null || processingJob?.isActive == true) {
+            return
+        }
+        processingJob = viewModelScope.launch {
+            showLocalSource.upsertShows(listOf(show))
+            episodeLocalSource.upsertEpisodes(listOf(episode))
+
+            navigateEpisode.update {
+                Pair(show.ids.trakt, episode)
+            }
+        }
+    }
+
+    fun navigateToMovie(movie: Movie) {
+        if (navigateMovie.value != null || processingJob?.isActive == true) {
+            return
+        }
+        processingJob = viewModelScope.launch {
+            movieLocalSource.upsertMovies(listOf(movie))
+            navigateMovie.update { movie.ids.trakt }
+        }
+    }
+
+    fun rateItem(
+        item: HomeActivityItem,
+        rating: Int?,
+    ) {
+        ratingJob?.cancel()
+        ratingJob = viewModelScope.launch {
+            val updated = rateActivityItemUseCase.rateItem(
+                item = item,
+                rating = rating,
+                ratings = itemsRatingsState.value,
+            ) ?: return@launch
+            itemsRatingsState.update { updated }
+        }
+    }
+
+    fun clearNavigation() {
+        navigateShow.update { null }
+        navigateEpisode.update { null }
+        navigateMovie.update { null }
+
+        processingJob?.cancel()
+        processingJob = null
+    }
+
+    fun setCollapsed(collapsed: Boolean) {
+        collapseState.update { collapsed }
+
+        collapseJob?.cancel()
+        collapseJob = viewModelScope.launch {
+            val key = when (filterState.value.mode) {
+                MediaMode.Media -> CollapsingKey.HOME_MEDIA_HISTORY
+                MediaMode.Shows -> CollapsingKey.HOME_SHOWS_HISTORY
+                MediaMode.Movies -> CollapsingKey.HOME_MOVIES_HISTORY
+            }
+            when {
+                collapsed -> collapsingManager.collapse(key)
+                else -> collapsingManager.expand(key)
+            }
+        }
+    }
+
+    private fun isCollapsed(): Boolean {
+        return collapsingManager.isCollapsed(
+            key = when (filterState.value.mode) {
+                MediaMode.Media -> CollapsingKey.HOME_MEDIA_HISTORY
+                MediaMode.Shows -> CollapsingKey.HOME_SHOWS_HISTORY
+                MediaMode.Movies -> CollapsingKey.HOME_MOVIES_HISTORY
+            },
+        )
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    val state = combine(
+        loadingState,
+        itemsState,
+        itemsRatingsState,
+        collapseState,
+        navigateShow,
+        navigateEpisode,
+        navigateMovie,
+        errorState,
+        userState,
+    ) { states ->
+        HomeHistoryState(
+            loading = states[0] as LoadingState,
+            items = states[1] as? ImmutableList<HomeActivityItem>,
+            itemsRatings = states[2] as? ImmutableMap<String, UserRating>,
+            collapsed = states[3] as Boolean,
+            navigateShow = states[4] as? TraktId,
+            navigateEpisode = states[5] as? Pair<TraktId, Episode>,
+            navigateMovie = states[6] as? TraktId,
+            error = states[7] as? Exception,
+            user = states[8] as? User,
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = initialState,
+    )
+}

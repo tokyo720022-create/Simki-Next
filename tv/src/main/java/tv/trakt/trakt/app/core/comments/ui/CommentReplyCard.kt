@@ -1,0 +1,277 @@
+package tv.trakt.trakt.app.core.comments.ui
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.tv.material3.Border
+import androidx.tv.material3.Card
+import androidx.tv.material3.CardDefaults
+import androidx.tv.material3.Text
+import coil3.ColorImage
+import coil3.annotation.ExperimentalCoilApi
+import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePreviewHandler
+import coil3.compose.LocalAsyncImagePreviewHandler
+import tv.trakt.trakt.app.ui.theme.TraktTheme
+import tv.trakt.trakt.common.helpers.extensions.capitalize
+import tv.trakt.trakt.common.helpers.extensions.longDateTimeFormat
+import tv.trakt.trakt.common.helpers.extensions.toMarkdownText
+import tv.trakt.trakt.common.helpers.preview.PreviewData
+import tv.trakt.trakt.common.model.Comment
+import tv.trakt.trakt.common.model.CommentGif
+import tv.trakt.trakt.common.model.CommentUserProgress
+import tv.trakt.trakt.common.model.User
+import tv.trakt.trakt.resources.R
+
+@Composable
+internal fun CommentReplyCard(
+    comment: Comment,
+    modifier: Modifier = Modifier,
+    user: User? = null,
+    progressTotal: Int? = null,
+) {
+    val progress = remember(user, comment, progressTotal) {
+        comment.userStats.progress(progressTotal)
+            .takeIf { comment.user.ids.trakt != user?.ids?.trakt }
+    }
+
+    var spoilersHidden by remember { mutableStateOf(true) }
+    var isExpanded by remember { mutableStateOf(false) }
+
+    Card(
+        onClick = {
+            spoilersHidden = !spoilersHidden
+            isExpanded = !isExpanded
+        },
+        modifier = modifier,
+        shape = CardDefaults.shape(
+            shape = RoundedCornerShape(12.dp),
+        ),
+        border = CardDefaults.border(
+            focusedBorder = Border(
+                border = BorderStroke(
+                    width = (2.75).dp,
+                    color = TraktTheme.colors.accent,
+                ),
+                shape = RoundedCornerShape(12.dp),
+            ),
+        ),
+        colors = CardDefaults.colors(
+            containerColor = TraktTheme.colors.commentReplyContainer,
+            focusedContainerColor = TraktTheme.colors.commentReplyContainer,
+        ),
+        scale = CardDefaults.scale(focusedScale = 1.02f),
+        content = {
+            CommentCardContent(
+                comment = comment,
+                spoilersHidden = spoilersHidden,
+                isExpanded = isExpanded,
+                progress = progress,
+            )
+        },
+    )
+}
+
+@Composable
+private fun CommentCardContent(
+    comment: Comment,
+    spoilersHidden: Boolean,
+    isExpanded: Boolean,
+    progress: CommentUserProgress?,
+) {
+    Column(
+        verticalArrangement = spacedBy(0.dp, Alignment.Top),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+    ) {
+        CommentHeader(
+            comment = comment,
+            progress = progress,
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        val markdownText = remember(comment.commentNoSpoilers) {
+            comment.commentNoSpoilers.toMarkdownText()
+        }
+
+        if (comment.commentNoSpoilers.isNotBlank()) {
+            Text(
+                text = markdownText,
+                style = TraktTheme.typography.paragraphSmall,
+                color = TraktTheme.colors.textSecondary,
+                maxLines = if (isExpanded) Int.MAX_VALUE else 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.then(
+                    if (comment.hasSpoilers && spoilersHidden) {
+                        Modifier.blur(4.dp)
+                    } else {
+                        Modifier
+                    },
+                ),
+            )
+        }
+
+        comment.gif?.let { gif ->
+            CommentGifView(
+                gif = gif,
+                blurred = comment.hasSpoilers && spoilersHidden,
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 12.dp),
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun CommentHeader(
+    comment: Comment,
+    progress: CommentUserProgress?,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier.size(36.dp),
+        ) {
+            val avatar = comment.user.images?.avatar?.full
+            val avatarBorder = when {
+                comment.user.isAnyVip -> TraktTheme.colors.vipAccent
+                else -> Color.Transparent
+            }
+
+            if (avatar != null) {
+                AsyncImage(
+                    model = avatar,
+                    contentDescription = "User avatar",
+                    contentScale = ContentScale.Crop,
+                    error = painterResource(R.drawable.ic_person_placeholder),
+                    modifier = Modifier
+                        .border(2.5.dp, avatarBorder, CircleShape)
+                        .clip(CircleShape),
+                )
+            } else {
+                Image(
+                    painter = painterResource(R.drawable.ic_person_placeholder),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .border(2.5.dp, avatarBorder, CircleShape)
+                        .clip(CircleShape),
+                )
+            }
+        }
+
+        Column(verticalArrangement = spacedBy(1.dp)) {
+            Row(
+                horizontalArrangement = spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = comment.user.displayName,
+                    style = TraktTheme.typography.paragraph.copy(fontWeight = FontWeight.W600),
+                    color = TraktTheme.colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                text = comment.createdAt.format(longDateTimeFormat()).capitalize(),
+                style = TraktTheme.typography.paragraphSmall,
+                color = TraktTheme.colors.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        if (progress != null || comment.user5Rating != null) {
+            Spacer(modifier = Modifier.weight(1F))
+            CommentUserChips(
+                comment = comment,
+                progress = progress,
+            )
+        }
+    }
+}
+
+@Preview
+@Composable
+fun CommentReplyPreview() {
+    TraktTheme {
+        Column(
+            verticalArrangement = spacedBy(32.dp),
+        ) {
+            CommentReplyCard(
+                comment = PreviewData.comment1,
+            )
+            CommentReplyCard(
+                comment = PreviewData.comment1.copy(userRating = 7),
+                progressTotal = 10,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@Preview
+@Composable
+fun CommentReplyGifPreview() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.LightGray.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            Column(
+                verticalArrangement = spacedBy(32.dp),
+            ) {
+                CommentReplyCard(
+                    comment = PreviewData.comment1.copy(gif = PreviewGif),
+                )
+                CommentReplyCard(
+                    comment = PreviewData.comment1.copy(comment = "", gif = PreviewGif),
+                )
+                CommentReplyCard(
+                    comment = PreviewData.comment1.copy(isSpoiler = true, gif = PreviewGif),
+                )
+            }
+        }
+    }
+}
+
+private val PreviewGif = CommentGif(
+    slug = "funny-cat",
+    url = "https://example.com/preview.gif",
+)

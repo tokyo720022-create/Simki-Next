@@ -1,0 +1,210 @@
+@file:OptIn(ExperimentalFoundationApi::class)
+
+package tv.trakt.trakt.core.summary.people.ui
+
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Arrangement.Absolute.spacedBy
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableMap
+import kotlinx.coroutines.launch
+import tv.trakt.trakt.common.core.user.UserCollectionState
+import tv.trakt.trakt.common.helpers.LoadingState
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.LoadingState.Idle
+import tv.trakt.trakt.common.helpers.LoadingState.Loading
+import tv.trakt.trakt.common.helpers.extensions.EmptyImmutableList
+import tv.trakt.trakt.common.helpers.extensions.onClick
+import tv.trakt.trakt.common.helpers.extensions.toLocal
+import tv.trakt.trakt.common.helpers.extensions.uppercaseWords
+import tv.trakt.trakt.common.model.MediaType.Show
+import tv.trakt.trakt.common.model.Person
+import tv.trakt.trakt.common.model.Show
+import tv.trakt.trakt.core.summary.people.ListEmptyView
+import tv.trakt.trakt.core.summary.people.ListLoadingView
+import tv.trakt.trakt.core.summary.people.helpers.resolveSelectedCreditsFilter
+import tv.trakt.trakt.core.summary.people.model.PersonCreditItem
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.TraktSectionHeader
+import tv.trakt.trakt.ui.components.mediacards.VerticalMediaCard
+import tv.trakt.trakt.ui.theme.TraktTheme
+
+@Composable
+internal fun ShowsCreditsList(
+    loading: LoadingState,
+    listItems: ImmutableMap<String, ImmutableList<PersonCreditItem.ShowItem>>,
+    userCollection: UserCollectionState,
+    person: Person,
+    modifier: Modifier = Modifier,
+    preferredFilter: String? = null,
+    sectionPadding: PaddingValues = PaddingValues(),
+    contentPadding: PaddingValues = PaddingValues(),
+    onClick: ((Show) -> Unit)? = null,
+    onLongClick: ((Show) -> Unit)? = null,
+    onMoreClick: ((String?) -> Unit)? = null,
+) {
+    val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState(
+        cacheWindow = LazyLayoutCacheWindow(
+            aheadFraction = 1F,
+            behindFraction = 1F,
+        ),
+    )
+
+    var selectedFilter by rememberSaveable(listItems.keys) {
+        mutableStateOf(
+            resolveSelectedCreditsFilter(listItems, person.knownForDepartment, preferredFilter),
+        )
+    }
+
+    Column(
+        verticalArrangement = spacedBy(TraktTheme.spacing.mainRowHeaderSpace),
+        modifier = modifier,
+    ) {
+        TraktSectionHeader(
+            title = stringResource(R.string.page_title_shows),
+            subtitle = listItems.keys.singleOrNull()
+                ?.takeIf { it.equals("acting", ignoreCase = true) }
+                ?.let { stringResource(R.string.translated_value_position_acting) },
+            chevron = loading != Done || listItems.isNotEmpty(),
+            collapsable = false,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(sectionPadding)
+                .onClick(enabled = loading == Done && listItems.isNotEmpty()) {
+                    onMoreClick?.invoke(selectedFilter)
+                },
+        )
+
+        Crossfade(
+            targetState = loading,
+            animationSpec = tween(200),
+        ) { loading ->
+            when (loading) {
+                Idle, Loading -> {
+                    ListLoadingView(
+                        visible = loading.isLoading,
+                        contentPadding = contentPadding,
+                    )
+                }
+
+                Done -> {
+                    if (listItems.isEmpty()) {
+                        ListEmptyView(
+                            contentPadding = sectionPadding,
+                        )
+                    } else {
+                        Column {
+                            if (listItems.keys.size > 1) {
+                                CreditsPositionFilters(
+                                    filters = listItems.keys,
+                                    selected = selectedFilter,
+                                    onSelected = {
+                                        selectedFilter = it
+                                        scope.launch {
+                                            listState.animateScrollToItem(0)
+                                        }
+                                    },
+                                )
+                            }
+
+                            LazyRow(
+                                state = listState,
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(TraktTheme.spacing.mainRowSpace),
+                                contentPadding = contentPadding,
+                            ) {
+                                items(
+                                    items = selectedFilter?.let { listItems[it] } ?: EmptyImmutableList,
+                                    key = { it.key },
+                                ) { item ->
+                                    VerticalMediaCard(
+                                        title = item.title,
+                                        imageUrl = item.images?.getPosterUrl(),
+                                        watched = userCollection.isWatched(item.id, Show, item.airedEpisodes),
+                                        watching = userCollection.isWatching(item.id, Show, item.airedEpisodes),
+                                        watchlist = userCollection.isWatchlist(item.id, Show),
+                                        onClick = { onClick?.invoke(item.show) },
+                                        onLongClick = { onLongClick?.invoke(item.show) },
+                                        chipSpacing = 10.dp,
+                                        chipContent = { modifier ->
+                                            val episodesCount = stringResource(
+                                                R.string.tag_text_number_of_episodes,
+                                                item.episodesCount,
+                                            )
+
+                                            val footerText = remember {
+                                                buildString {
+                                                    item.released?.let {
+                                                        append(it.toLocal().year.toString())
+                                                    } ?: append("TBA")
+
+                                                    if (item.episodesCount > 0) {
+                                                        append(" • ")
+                                                        append(episodesCount)
+                                                    }
+                                                }
+                                            }
+
+                                            Column(
+                                                verticalArrangement = Arrangement.spacedBy(0.dp),
+                                                modifier = modifier,
+                                            ) {
+                                                Text(
+                                                    text = footerText,
+                                                    style = TraktTheme.typography.cardTitle,
+                                                    color = TraktTheme.colors.textPrimary,
+                                                    textAlign = TextAlign.Center,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = modifier,
+                                                )
+
+                                                Text(
+                                                    text = (item.credit ?: "")
+                                                        .ifBlank { "N/A" }
+                                                        .uppercaseWords(),
+                                                    style = TraktTheme.typography.cardSubtitle,
+                                                    color = TraktTheme.colors.textSecondary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
+                                        },
+                                        modifier = Modifier.animateItem(
+                                            fadeInSpec = null,
+                                            fadeOutSpec = null,
+                                        ),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

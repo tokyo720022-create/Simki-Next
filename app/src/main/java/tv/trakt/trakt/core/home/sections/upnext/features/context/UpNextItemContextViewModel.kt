@@ -1,0 +1,184 @@
+package tv.trakt.trakt.core.home.sections.upnext.features.context
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import timber.log.Timber
+import tv.trakt.trakt.common.core.sync.changes.DataChange.Kind
+import tv.trakt.trakt.common.core.sync.changes.DataChanges
+import tv.trakt.trakt.common.core.user.usecases.progress.LoadUserProgressUseCase
+import tv.trakt.trakt.common.data.local.HomeUpNextLocalSource
+import tv.trakt.trakt.common.data.local.HomeUpcomingLocalSource
+import tv.trakt.trakt.common.firebase.analytics.Analytics
+import tv.trakt.trakt.common.helpers.LoadingState.Done
+import tv.trakt.trakt.common.helpers.LoadingState.Idle
+import tv.trakt.trakt.common.helpers.LoadingState.Loading
+import tv.trakt.trakt.common.helpers.extensions.recordError
+import tv.trakt.trakt.common.helpers.extensions.rethrowCancellation
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.core.home.sections.upnext.usecases.DropPlaybackUseCase
+import tv.trakt.trakt.core.sync.usecases.UpdateMovieHistoryUseCase
+import tv.trakt.trakt.core.sync.usecases.UpdateShowHistoryUseCase
+
+internal class UpNextItemContextViewModel(
+    private val updateShowHistoryUseCase: UpdateShowHistoryUseCase,
+    private val updateMovieHistoryUseCase: UpdateMovieHistoryUseCase,
+    private val dropPlaybackUseCase: DropPlaybackUseCase,
+    private val dataChanges: DataChanges,
+    private val upNextLocalSource: HomeUpNextLocalSource,
+    private val upcomingLocalSource: HomeUpcomingLocalSource,
+    private val loadUserProgressUseCase: LoadUserProgressUseCase,
+    private val analytics: Analytics,
+) : ViewModel() {
+    private val initialState = UpNextItemContextState()
+
+    private val loadingWatchedState = MutableStateFlow(initialState.loadingWatched)
+    private val loadingDropState = MutableStateFlow(initialState.loadingDrop)
+    private val errorState = MutableStateFlow(initialState.error)
+
+    fun dropShow(showId: TraktId) {
+        if (isLoading()) return
+        viewModelScope.launch {
+            clear()
+            try {
+                loadingDropState.update { Loading }
+                updateShowHistoryUseCase.dropShow(showId)
+
+                upNextLocalSource.removeShowItems(
+                    ids = listOf(showId),
+                )
+
+                upcomingLocalSource.removeShowItems(
+                    showIds = listOf(showId),
+                    notify = true,
+                )
+
+                dataChanges.notify(Kind.History)
+
+                loadUserShowsProgress()
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingDropState.update { Done }
+            }
+        }
+    }
+
+    fun dropMovie(movieId: TraktId) {
+        if (isLoading()) return
+        viewModelScope.launch {
+            clear()
+            try {
+                loadingDropState.update { Loading }
+                dropPlaybackUseCase.dropMoviePlayback(movieId)
+
+                upNextLocalSource.removeMovieItems(
+                    ids = listOf(movieId),
+                )
+
+                dataChanges.notify(Kind.History)
+
+                loadUserMoviesProgress()
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingDropState.update { Done }
+            }
+        }
+    }
+
+    fun addMovieToWatched(movieId: TraktId) {
+        if (isLoading()) return
+        viewModelScope.launch {
+            clear()
+            try {
+                loadingWatchedState.update { Loading }
+                dropPlaybackUseCase.dropMoviePlayback(movieId)
+                updateMovieHistoryUseCase.addToWatched(movieId)
+
+                upNextLocalSource.removeMovieItems(
+                    ids = listOf(movieId),
+                )
+
+                dataChanges.notify(Kind.History)
+
+                analytics.progress.logAddWatchedMedia(
+                    mediaType = "movie",
+                    source = "up_next_context",
+                    date = null,
+                )
+
+                loadUserMoviesProgress()
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    errorState.update { error }
+                    Timber.recordError(error)
+                }
+            } finally {
+                loadingWatchedState.update { Done }
+            }
+        }
+    }
+
+    fun loadUserShowsProgress() {
+        viewModelScope.launch {
+            try {
+                loadUserProgressUseCase.loadShowsProgress()
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    fun loadUserMoviesProgress() {
+        viewModelScope.launch {
+            try {
+                loadUserProgressUseCase.loadMoviesProgress()
+            } catch (error: Exception) {
+                error.rethrowCancellation {
+                    Timber.recordError(error)
+                }
+            }
+        }
+    }
+
+    fun clear() {
+        loadingWatchedState.update { Idle }
+        loadingDropState.update { Idle }
+        errorState.update { null }
+    }
+
+    private fun isLoading(): Boolean {
+        return loadingWatchedState.value.isLoading || loadingDropState.value.isLoading
+    }
+
+    val state: StateFlow<UpNextItemContextState> = combine(
+        loadingWatchedState,
+        loadingDropState,
+        errorState,
+    ) { s1, s2, s3 ->
+        UpNextItemContextState(
+            loadingWatched = s1,
+            loadingDrop = s2,
+            error = s3,
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = initialState,
+    )
+}

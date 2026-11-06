@@ -1,0 +1,366 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
+package tv.trakt.trakt.core.summary.shows.features.context.more
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Alignment.Companion.CenterVertically
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow.Companion.Ellipsis
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.net.toUri
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.ColorImage
+import coil3.annotation.ExperimentalCoilApi
+import coil3.compose.AsyncImagePreviewHandler
+import coil3.compose.LocalAsyncImagePreviewHandler
+import tv.trakt.trakt.common.helpers.extensions.openExternalAppLink
+import tv.trakt.trakt.common.helpers.extensions.toLocal
+import tv.trakt.trakt.common.helpers.preview.PreviewData
+import tv.trakt.trakt.common.helpers.streamingservices.StreamingServiceApp
+import tv.trakt.trakt.common.model.Show
+import tv.trakt.trakt.common.model.streamings.StreamingService
+import tv.trakt.trakt.core.summary.shows.ShowDetailsState.ProgressState
+import tv.trakt.trakt.core.summary.shows.features.context.more.ShowDetailsContextState.StreamingsState
+import tv.trakt.trakt.resources.R
+import tv.trakt.trakt.ui.components.buttons.GhostButton
+import tv.trakt.trakt.ui.components.buttons.WatchNowButton
+import tv.trakt.trakt.ui.theme.TraktTheme
+
+@Composable
+internal fun ShowDetailsContextView(
+    show: Show,
+    showProgress: ProgressState?,
+    viewModel: ShowDetailsContextViewModel,
+    modifier: Modifier = Modifier,
+    onHistoryClick: (() -> Unit)? = null,
+    onCheckClick: (() -> Unit)? = null,
+    onListsClick: (() -> Unit)? = null,
+    onCoverClick: (() -> Unit)? = null,
+    onReportClick: (() -> Unit)? = null,
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    ShowDetailsContextViewContent(
+        show = show,
+        showProgress = showProgress,
+        state = state,
+        onHistoryClick = onHistoryClick,
+        onCheckClick = onCheckClick,
+        onListsClick = onListsClick,
+        onCoverClick = onCoverClick,
+        onReportClick = onReportClick,
+        onStreamClick = viewModel::logStreamOn,
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun ShowDetailsContextViewContent(
+    show: Show,
+    showProgress: ProgressState?,
+    state: ShowDetailsContextState,
+    modifier: Modifier = Modifier,
+    onCheckClick: (() -> Unit)? = null,
+    onHistoryClick: (() -> Unit)? = null,
+    onListsClick: (() -> Unit)? = null,
+    onCoverClick: (() -> Unit)? = null,
+    onReportClick: (() -> Unit)? = null,
+    onStreamClick: (StreamingService) -> Unit = {},
+) {
+    val context = LocalContext.current
+
+    val isReleased = show.rememberReleased()
+
+    val genresText = show.genres.take(2)
+        .map { stringResource(it.displayStringRes) }
+        .joinToString(", ")
+
+    Column(
+        verticalArrangement = spacedBy(0.dp),
+        modifier = modifier,
+    ) {
+        Row(
+            verticalAlignment = CenterVertically,
+            horizontalArrangement = spacedBy(16.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                verticalArrangement = spacedBy(2.dp),
+                modifier = Modifier.weight(2f),
+            ) {
+                Text(
+                    text = show.title,
+                    color = TraktTheme.colors.textPrimary,
+                    style = TraktTheme.typography.heading3,
+                    maxLines = 1,
+                    overflow = Ellipsis,
+                    autoSize = TextAutoSize.StepBased(
+                        maxFontSize = TraktTheme.typography.heading3.fontSize,
+                        minFontSize = 16.sp,
+                        stepSize = 2.sp,
+                    ),
+                )
+
+                Text(
+                    text = "${show.releasedAt?.toLocal()?.year ?: show.year}  •  $genresText",
+                    color = TraktTheme.colors.textSecondary,
+                    style = TraktTheme.typography.paragraphSmaller,
+                    maxLines = 1,
+                    overflow = Ellipsis,
+                )
+            }
+
+            if (isReleased && state.user != null) {
+                WatchButton(
+                    streamingState = state.streamings,
+                    onClick = {
+                        state.streamings.service?.let { service ->
+                            onStreamClick(service)
+                            openExternalAppLink(
+                                packageId = StreamingServiceApp.findFromSource(service.source)?.packageId,
+                                packageName = service.source,
+                                uri = service.linkDirect?.toUri(),
+                                context = context,
+                            )
+                        }
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(top = 4.dp),
+                )
+            }
+        }
+
+        Spacer(
+            modifier = Modifier
+                .padding(top = 22.dp)
+                .background(TraktTheme.colors.separator)
+                .fillMaxWidth()
+                .height(1.dp),
+        )
+
+        ActionButtons(
+            released = isReleased,
+            started = showProgress?.isWatching == true,
+            watched = showProgress?.isWatched == true,
+            lists = showProgress?.inLists == true,
+            watchOnlyOnce = state.user?.settings?.watchOnlyOnce,
+            coverEnabled = !show.images?.getFanartUrl().isNullOrBlank(),
+            onCheckClick = onCheckClick ?: {},
+            onHistoryClick = onHistoryClick ?: {},
+            onListsClick = onListsClick ?: {},
+            onCoverClick = onCoverClick ?: {},
+            onReportClick = onReportClick ?: {},
+            modifier = Modifier.padding(top = 14.dp),
+        )
+    }
+}
+
+@Composable
+private fun WatchButton(
+    streamingState: StreamingsState,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val service = streamingState.service
+    val loading = streamingState.loading
+    val directLink = service?.linkDirect
+
+    WatchNowButton(
+        text = when {
+            streamingState.loading -> stringResource(R.string.button_text_stream)
+            streamingState.noServices -> stringResource(R.string.button_text_no_services)
+            directLink != null -> service.name
+            else -> ""
+        },
+        textStyle = when {
+            streamingState.loading -> TraktTheme.typography.buttonPrimary.copy(fontSize = 12.sp)
+            streamingState.noServices -> TraktTheme.typography.buttonPrimary.copy(fontSize = 12.sp)
+            else -> TraktTheme.typography.buttonPrimary
+        },
+        logo = when {
+            directLink != null -> service.logo
+            else -> null
+        },
+        enabled = !loading && !streamingState.noServices,
+        loading = loading,
+        containerColor = when {
+            (service?.color != null) -> service.color ?: TraktTheme.colors.primaryButtonContainer
+            else -> TraktTheme.colors.primaryButtonContainerDisabled
+        },
+        height = 40.dp,
+        corner = 12.dp,
+        onClick = onClick,
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun ActionButtons(
+    started: Boolean,
+    watched: Boolean,
+    released: Boolean,
+    lists: Boolean,
+    watchOnlyOnce: Boolean?,
+    coverEnabled: Boolean,
+    modifier: Modifier = Modifier,
+    onCheckClick: () -> Unit,
+    onCoverClick: () -> Unit,
+    onReportClick: () -> Unit,
+    onHistoryClick: () -> Unit,
+    onListsClick: () -> Unit,
+) {
+    Column(
+        verticalArrangement = spacedBy(TraktTheme.spacing.contextItemsSpace),
+        modifier = modifier
+            .graphicsLayer {
+                translationX = -4.dp.toPx()
+            },
+    ) {
+        if (!watched || watchOnlyOnce != true) {
+            GhostButton(
+                text = when {
+                    !watched -> stringResource(R.string.button_text_track)
+                    else -> stringResource(R.string.button_text_watch_again)
+                },
+                icon = when {
+                    !watched -> painterResource(R.drawable.ic_check_2)
+                    else -> painterResource(R.drawable.ic_check_double)
+                },
+                enabled = released,
+                iconSize = 22.dp,
+                iconSpace = 14.dp,
+                onClick = onCheckClick,
+                modifier = Modifier.graphicsLayer {
+                    translationX = -4.dp.toPx()
+                },
+            )
+        }
+
+        if (lists) {
+            GhostButton(
+                text = stringResource(R.string.button_text_manage_lists),
+                icon = painterResource(R.drawable.ic_lists_off),
+                iconSize = 21.dp,
+                iconSpace = 15.dp,
+                modifier = Modifier
+                    .graphicsLayer {
+                        translationX = -4.dp.toPx()
+                    },
+                onClick = onListsClick,
+            )
+        }
+
+        if (watched || started) {
+            GhostButton(
+                text = stringResource(R.string.button_text_history),
+                icon = painterResource(R.drawable.ic_calendar_check),
+                iconSize = 23.dp,
+                iconSpace = 15.5.dp,
+                modifier = Modifier
+                    .graphicsLayer {
+                        translationX = -6.dp.toPx()
+                    },
+                onClick = onHistoryClick,
+            )
+        }
+
+        Box(
+            contentAlignment = Alignment.CenterEnd,
+            modifier = Modifier
+                .graphicsLayer {
+                    translationX = -5.dp.toPx()
+                },
+        ) {
+            GhostButton(
+                text = stringResource(R.string.button_text_set_cover_image),
+                icon = painterResource(R.drawable.ic_image),
+                iconSize = 22.dp,
+                iconSpace = 15.dp,
+                enabled = coverEnabled,
+                onClick = onCoverClick,
+            )
+        }
+
+        GhostButton(
+            text = stringResource(R.string.button_text_report),
+            icon = painterResource(R.drawable.ic_flag),
+            iconSize = 22.dp,
+            iconSpace = 15.dp,
+            modifier = Modifier
+                .graphicsLayer {
+                    translationX = -5.dp.toPx()
+                },
+            onClick = onReportClick,
+        )
+    }
+}
+
+@OptIn(ExperimentalCoilApi::class)
+@Preview(
+    device = "id:pixel_5",
+    showBackground = true,
+    backgroundColor = 0xFF212427,
+    locale = "en",
+)
+@Composable
+private fun Preview() {
+    TraktTheme {
+        val previewHandler = AsyncImagePreviewHandler {
+            ColorImage(Color.Blue.toArgb())
+        }
+        CompositionLocalProvider(LocalAsyncImagePreviewHandler provides previewHandler) {
+            ShowDetailsContextViewContent(
+                show = PreviewData.show1,
+                showProgress = ProgressState(
+                    aired = 10,
+                    plays = 5,
+                    playsWithoutSpecials = 5,
+                    inWatchlist = true,
+                    inLists = true,
+                ),
+                state = ShowDetailsContextState(
+                    streamings = StreamingsState(
+                        loading = false,
+                        service = StreamingService(
+                            source = "Hello",
+                            name = "Hello",
+                            logo = null,
+                            channel = "Hello",
+                            linkDirect = "Hello",
+                            uhd = false,
+                            color = null,
+                            country = "Hello",
+                            currency = null,
+                            purchasePrice = "Hello",
+                            rentPrice = "Hello",
+                        ),
+                    ),
+                ),
+            )
+        }
+    }
+}

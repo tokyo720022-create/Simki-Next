@@ -1,0 +1,11 @@
+package tv.trakt.trakt.core.checkin.di
+
+import org.koin.core.module.dsl.bind
+import org.koin.core.module.dsl.singleOf
+import org.koin.dsl.module
+import tv.trakt.trakt.core.checkin.data.CheckInManager
+import tv.trakt.trakt.core.checkin.data.DefaultCheckInManager
+
+val checkInModule = module {
+    singleOf(::DefaultCheckInManager) { bind<CheckInManager>() }
+}

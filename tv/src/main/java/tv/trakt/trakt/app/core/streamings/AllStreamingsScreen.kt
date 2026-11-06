@@ -1,0 +1,314 @@
+package tv.trakt.trakt.app.core.streamings
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Arrangement.spacedBy
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight.Companion.W700
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.tv.material3.Text
+import kotlinx.collections.immutable.ImmutableList
+import tv.trakt.trakt.app.common.ui.GenericErrorView
+import tv.trakt.trakt.app.common.ui.PositionFocusLazyRow
+import tv.trakt.trakt.app.core.details.ui.BackdropImage
+import tv.trakt.trakt.app.core.streamings.views.AllStreamingItemView
+import tv.trakt.trakt.app.core.streamings.views.AllStreamingYouTubeItemView
+import tv.trakt.trakt.app.ui.theme.TraktTheme
+import tv.trakt.trakt.common.core.streamings.model.AllStreamingsSection
+import tv.trakt.trakt.common.core.streamings.model.StreamingServiceRow
+import tv.trakt.trakt.common.core.streamings.model.withFreeSection
+import tv.trakt.trakt.common.helpers.extensions.openWatchNowLink
+import tv.trakt.trakt.common.model.streamings.StreamingService
+import tv.trakt.trakt.common.model.streamings.StreamingType
+import tv.trakt.trakt.common.model.streamings.StreamingType.Free
+import tv.trakt.trakt.common.model.streamings.StreamingType.Purchase
+import tv.trakt.trakt.common.model.streamings.StreamingType.Rent
+import tv.trakt.trakt.common.model.streamings.YouTubeSpecial
+import tv.trakt.trakt.common.ui.composables.FilmProgressIndicator
+import tv.trakt.trakt.resources.R
+
+private val sections = listOf(
+    "initial",
+    "content",
+)
+
+@Composable
+internal fun AllStreamingsScreen(viewModel: AllStreamingsViewModel) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    AllStreamingsContent(
+        state = state,
+    )
+}
+
+@Composable
+internal fun AllStreamingsContent(
+    state: AllStreamingsState,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
+
+    val focusRequesters = remember {
+        sections.associateBy(
+            keySelector = { it },
+            valueTransform = { FocusRequester() },
+        )
+    }
+
+    LaunchedEffect(Unit) {
+        focusRequesters["initial"]?.requestFocus()
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(TraktTheme.colors.backgroundPrimary),
+    ) {
+        BackdropImage(
+            imageUrl = "",
+            blur = 4.dp,
+            imageAlpha = 0.85F,
+            saturation = 0.95F,
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    top = TraktTheme.spacing.mainContentVerticalSpace,
+                    bottom = TraktTheme.spacing.mainContentVerticalSpace,
+                    start = TraktTheme.spacing.mainContentStartSpace,
+                    end = 24.dp,
+                )
+                .clip(RoundedCornerShape(16.dp))
+                .background(TraktTheme.colors.dialogContainer),
+        ) {
+            Text(
+                text = stringResource(R.string.button_text_where_to_watch),
+                color = TraktTheme.colors.textPrimary,
+                style = TraktTheme.typography.heading4,
+                modifier = Modifier
+                    .padding(
+                        top = 24.dp,
+                        start = 32.dp,
+                    )
+                    .focusRequester(focusRequesters.getValue("initial"))
+                    .focusable(),
+            )
+
+            when {
+                state.loading -> {
+                    FilmProgressIndicator(
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .padding(top = 16.dp),
+                    )
+                }
+
+                state.error == null && state.sections.isEmpty() && state.youTubeSpecial == null -> {
+                    Text(
+                        text = stringResource(R.string.button_text_no_services),
+                        color = TraktTheme.colors.textSecondary,
+                        style = TraktTheme.typography.heading6,
+                        modifier = Modifier
+                            .padding(
+                                top = 16.dp,
+                                start = 32.dp,
+                            ),
+                    )
+                }
+
+                else -> {
+                    AllStreamingsContentGrid(
+                        sections = state.sections,
+                        youTubeSpecial = state.youTubeSpecial,
+                        focusRequesters = focusRequesters,
+                        onItemClick = {
+                            openWatchNowLink(
+                                context = context,
+                                uriHandler = uriHandler,
+                                link = it.linkDirect,
+                            )
+                        },
+                        onYouTubeSpecialClick = {
+                            uriHandler.openUri(it.link)
+                        },
+                        modifier = Modifier
+                            .padding(top = 8.dp),
+                    )
+                }
+            }
+
+            if (state.error != null) {
+                GenericErrorView(
+                    error = state.error,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(32.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AllStreamingsContentGrid(
+    sections: ImmutableList<AllStreamingsSection>,
+    youTubeSpecial: YouTubeSpecial?,
+    modifier: Modifier = Modifier,
+    focusRequesters: Map<String, FocusRequester>,
+    onItemClick: (StreamingService) -> Unit,
+    onYouTubeSpecialClick: (YouTubeSpecial) -> Unit,
+) {
+    val scrollState = rememberScrollState()
+
+    Column(
+        verticalArrangement = spacedBy(12.dp),
+        modifier = modifier
+            .verticalScroll(scrollState)
+            .padding(bottom = 32.dp)
+            .focusRequester(
+                focusRequesters.getValue("content"),
+            ),
+    ) {
+        sections
+            .withFreeSection(youTubeSpecial != null)
+            .forEach { section ->
+                StreamingsListSection(
+                    type = section.type,
+                    rows = section.rows,
+                    youTubeSpecial = youTubeSpecial.takeIf { section.type == Free },
+                    onItemClick = onItemClick,
+                    onYouTubeSpecialClick = onYouTubeSpecialClick,
+                )
+            }
+    }
+}
+
+@Composable
+private fun StreamingsListSection(
+    type: StreamingType,
+    rows: ImmutableList<StreamingServiceRow>,
+    youTubeSpecial: YouTubeSpecial?,
+    onItemClick: (StreamingService) -> Unit,
+    onYouTubeSpecialClick: (YouTubeSpecial) -> Unit,
+) {
+    Text(
+        text = stringResource(type.labelRes).uppercase(),
+        color = TraktTheme.colors.textSecondary,
+        style = TraktTheme.typography.paragraphSmall.copy(fontWeight = W700),
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.padding(top = 12.dp, start = 32.dp),
+    )
+
+    if (youTubeSpecial != null) {
+        PositionFocusLazyRow(
+            mainContentStart = 32.dp,
+            contentPadding = PaddingValues(horizontal = 32.dp),
+        ) {
+            item(key = "youtube-special") {
+                AllStreamingYouTubeItemView(
+                    special = youTubeSpecial,
+                    onClick = { onYouTubeSpecialClick(youTubeSpecial) },
+                    modifier = Modifier.width(200.dp),
+                )
+            }
+        }
+    }
+
+    rows.forEach { (source, items) ->
+        PositionFocusLazyRow(
+            mainContentStart = 32.dp,
+            contentPadding = PaddingValues(horizontal = 32.dp),
+        ) {
+            items(
+                count = items.size,
+                key = { "$source-${items[it].country}" },
+            ) { index ->
+                val item = items.getOrNull(index) ?: return@items
+
+                val currencySymbol = item.currency?.symbol
+                val currencySpace = remember(currencySymbol) {
+                    if (currencySymbol?.count() == 1) "" else " "
+                }
+
+                AllStreamingItemView(
+                    name = item.name,
+                    country = item.country,
+                    logo = item.logo,
+                    channel = item.channel,
+                    price = when (type) {
+                        Purchase -> remember(item.purchasePrice) {
+                            "$currencySymbol$currencySpace${item.purchasePrice}".trim()
+                        }
+
+                        Rent -> remember(item.rentPrice) {
+                            "$currencySymbol$currencySpace${item.rentPrice}".trim()
+                        }
+
+                        else -> null
+                    },
+                    contentColor = item.color ?: Color.Black,
+                    onClick = { onItemClick(item) },
+                    modifier = Modifier.width(200.dp),
+                )
+            }
+        }
+    }
+}
+
+@Preview(
+    device = "id:tv_4k",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+)
+@Composable
+private fun Preview() {
+    TraktTheme {
+        AllStreamingsContent(
+            state = AllStreamingsState(),
+        )
+    }
+}
+
+@Preview(
+    device = "id:tv_4k",
+    showBackground = true,
+    backgroundColor = 0xFF131517,
+)
+@Composable
+private fun PreviewYouTubeSpecial() {
+    TraktTheme {
+        AllStreamingsContent(
+            state = AllStreamingsState(
+                loading = false,
+                youTubeSpecial = YouTubeSpecial(videoId = "abc", isOfficial = false),
+            ),
+        )
+    }
+}

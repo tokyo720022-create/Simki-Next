@@ -1,0 +1,468 @@
+package tv.trakt.trakt.common.data.remote
+
+import org.openapitools.client.apis.ListsApi
+import org.openapitools.client.models.PostUsersListsCreateRequest
+import org.openapitools.client.models.PostUsersListsListAddRequest
+import org.openapitools.client.models.PostUsersListsListAddRequestEpisodesInner
+import org.openapitools.client.models.PostUsersListsListAddRequestEpisodesInnerIds
+import org.openapitools.client.models.PostUsersListsListAddRequestMoviesInner
+import org.openapitools.client.models.PostUsersListsListAddRequestMoviesInnerIds
+import org.openapitools.client.models.PostUsersListsListAddRequestSeasonsInner
+import org.openapitools.client.models.PostUsersListsListAddRequestSeasonsInnerIds
+import org.openapitools.client.models.PostUsersListsListAddRequestShowsInner
+import org.openapitools.client.models.PostUsersListsListAddRequestShowsInnerIds
+import org.openapitools.client.models.PostUsersListsReorderRequest
+import org.openapitools.client.models.PutUsersListsListUpdateRequest
+import tv.trakt.trakt.common.model.TraktId
+import tv.trakt.trakt.common.model.globalfilter.GlobalFilter
+import tv.trakt.trakt.common.model.lists.ParentalGuideCategory
+import tv.trakt.trakt.common.model.pagination.Pagination
+import tv.trakt.trakt.common.model.sorting.Sorting
+import tv.trakt.trakt.common.networking.ListDto
+import tv.trakt.trakt.common.networking.ListItemDto
+import tv.trakt.trakt.common.networking.ListMediaItemDto
+import tv.trakt.trakt.common.networking.ListMovieItemDto
+import tv.trakt.trakt.common.networking.ListShowItemDto
+import tv.trakt.trakt.common.networking.helpers.CacheMarkerProvider
+
+class ListsRemoteSource(
+    private val listsApi: ListsApi,
+    private val cacheMarker: CacheMarkerProvider,
+) {
+    suspend fun createList(
+        name: String,
+        description: String?,
+        privacy: String,
+    ) {
+        val request = PostUsersListsCreateRequest(
+            name = name,
+            description = description,
+            privacy = privacy,
+        )
+
+        listsApi.postUsersListsCreate(
+            id = "me",
+            postUsersListsCreateRequest = request,
+        )
+
+        cacheMarker.invalidate()
+    }
+
+    suspend fun editList(
+        listId: TraktId,
+        name: String,
+        description: String?,
+        privacy: String,
+        sorting: Sorting?,
+    ) {
+        val request = PutUsersListsListUpdateRequest(
+            name = name,
+            description = description,
+            privacy = privacy,
+            sortBy = sorting?.type?.value,
+            sortHow = PutUsersListsListUpdateRequest.SortHow.entries.find {
+                it.value == sorting?.order?.value
+            },
+        )
+
+        listsApi.putUsersListsListUpdate(
+            id = "me",
+            listId = listId.value.toString(),
+            putUsersListsListUpdateRequest = request,
+        )
+
+        cacheMarker.invalidate()
+    }
+
+    suspend fun getList(listId: TraktId): ListDto {
+        val response = listsApi.getUsersListsListSummary(
+            id = "me",
+            listId = listId.value.toString(),
+            extended = "images",
+        )
+        return response.body()
+    }
+
+    suspend fun deleteList(listId: TraktId) {
+        listsApi.deleteUsersListsListDelete(
+            id = "me",
+            listId = listId.value.toString(),
+        )
+
+        cacheMarker.invalidate()
+    }
+
+    suspend fun addShowToList(
+        userId: TraktId,
+        listId: TraktId,
+        showId: TraktId,
+    ) {
+        listsApi.postUsersListsListAdd(
+            id = userId.value.toString(),
+            listId = listId.value.toString(),
+            postUsersListsListAddRequest = PostUsersListsListAddRequest(
+                shows = listOf(
+                    PostUsersListsListAddRequestShowsInner(
+                        ids = PostUsersListsListAddRequestShowsInnerIds(
+                            trakt = showId.value,
+                            slug = null,
+                            imdb = null,
+                            tmdb = null,
+                            tvdb = 0,
+                        ),
+                        title = "",
+                        year = 0,
+                    ),
+                ),
+            ),
+        )
+        cacheMarker.invalidate()
+    }
+
+    suspend fun removeShowFromList(
+        userId: TraktId,
+        listId: TraktId,
+        showId: TraktId,
+    ) {
+        listsApi.postUsersListsListRemove(
+            id = userId.value.toString(),
+            listId = listId.value.toString(),
+            postUsersListsListAddRequest = PostUsersListsListAddRequest(
+                shows = listOf(
+                    PostUsersListsListAddRequestShowsInner(
+                        ids = PostUsersListsListAddRequestShowsInnerIds(
+                            trakt = showId.value,
+                            slug = null,
+                            imdb = null,
+                            tmdb = null,
+                            tvdb = 0,
+                        ),
+                        title = "",
+                        year = 0,
+                    ),
+                ),
+            ),
+        )
+        cacheMarker.invalidate()
+    }
+
+    suspend fun addMovieToList(
+        userId: TraktId,
+        listId: TraktId,
+        movieId: TraktId,
+    ) {
+        listsApi.postUsersListsListAdd(
+            id = userId.value.toString(),
+            listId = listId.value.toString(),
+            postUsersListsListAddRequest = PostUsersListsListAddRequest(
+                movies = listOf(
+                    PostUsersListsListAddRequestMoviesInner(
+                        ids = PostUsersListsListAddRequestMoviesInnerIds(
+                            trakt = movieId.value,
+                            slug = null,
+                            imdb = null,
+                            tmdb = 0,
+                        ),
+                        title = "",
+                        year = 0,
+                    ),
+                ),
+            ),
+        )
+        cacheMarker.invalidate()
+    }
+
+    suspend fun removeMovieFromList(
+        userId: TraktId,
+        listId: TraktId,
+        movieId: TraktId,
+    ) {
+        listsApi.postUsersListsListRemove(
+            id = userId.value.toString(),
+            listId = listId.value.toString(),
+            postUsersListsListAddRequest = PostUsersListsListAddRequest(
+                movies = listOf(
+                    PostUsersListsListAddRequestMoviesInner(
+                        ids = PostUsersListsListAddRequestMoviesInnerIds(
+                            trakt = movieId.value,
+                            slug = null,
+                            imdb = null,
+                            tmdb = 0,
+                        ),
+                        title = "",
+                        year = 0,
+                    ),
+                ),
+            ),
+        )
+        cacheMarker.invalidate()
+    }
+
+    suspend fun addSeasonToList(
+        userId: TraktId,
+        listId: TraktId,
+        seasonId: TraktId,
+    ) {
+        listsApi.postUsersListsListAdd(
+            id = userId.value.toString(),
+            listId = listId.value.toString(),
+            postUsersListsListAddRequest = seasonRequest(seasonId),
+        )
+        cacheMarker.invalidate()
+    }
+
+    suspend fun removeSeasonFromList(
+        userId: TraktId,
+        listId: TraktId,
+        seasonId: TraktId,
+    ) {
+        listsApi.postUsersListsListRemove(
+            id = userId.value.toString(),
+            listId = listId.value.toString(),
+            postUsersListsListAddRequest = seasonRequest(seasonId),
+        )
+        cacheMarker.invalidate()
+    }
+
+    suspend fun addEpisodeToList(
+        userId: TraktId,
+        listId: TraktId,
+        episodeId: TraktId,
+    ) {
+        listsApi.postUsersListsListAdd(
+            id = userId.value.toString(),
+            listId = listId.value.toString(),
+            postUsersListsListAddRequest = episodeRequest(episodeId),
+        )
+        cacheMarker.invalidate()
+    }
+
+    suspend fun removeEpisodeFromList(
+        userId: TraktId,
+        listId: TraktId,
+        episodeId: TraktId,
+    ) {
+        listsApi.postUsersListsListRemove(
+            id = userId.value.toString(),
+            listId = listId.value.toString(),
+            postUsersListsListAddRequest = episodeRequest(episodeId),
+        )
+        cacheMarker.invalidate()
+    }
+
+    private fun seasonRequest(seasonId: TraktId): PostUsersListsListAddRequest {
+        return PostUsersListsListAddRequest(
+            seasons = listOf(
+                PostUsersListsListAddRequestSeasonsInner(
+                    ids = PostUsersListsListAddRequestSeasonsInnerIds(
+                        trakt = seasonId.value,
+                        tmdb = null,
+                        tvdb = -1,
+                    ),
+                ),
+            ),
+        )
+    }
+
+    private fun episodeRequest(episodeId: TraktId): PostUsersListsListAddRequest {
+        return PostUsersListsListAddRequest(
+            episodes = listOf(
+                PostUsersListsListAddRequestEpisodesInner(
+                    ids = PostUsersListsListAddRequestEpisodesInnerIds(
+                        trakt = episodeId.value,
+                        tvdb = -1,
+                        imdb = null,
+                        tmdb = null,
+                    ),
+                ),
+            ),
+        )
+    }
+
+    suspend fun getAllListItems(
+        listId: TraktId,
+        extended: String?,
+        sorting: Sorting,
+        pagination: Pagination,
+        filters: GlobalFilter?,
+    ): List<ListItemDto> {
+        val response = listsApi.getListsItemsAll(
+            id = listId.value.toString(),
+            extended = extended,
+            watchnow = filters?.availability?.joinToString(",") { it.slug },
+            genres = filters?.genresParam,
+            subgenres = filters?.subgenre?.joinToString(","),
+            years = filters?.years?.let { "${it.first}-${it.second}" },
+            ratings = filters?.rating?.let { "${it.first}-${it.second}" },
+            startDate = null,
+            endDate = null,
+            page = pagination.page,
+            limit = pagination.limit.toString(),
+            sortBy = sorting.type.value,
+            sortHow = sorting.order.value,
+            runtimes = filters?.runtime?.let { "${it.first}-${it.second}" },
+            countries = filters?.countriesParam,
+            statuses = filters?.statusesParam,
+            certifications = filters?.certificationsParam,
+            parentalNudity = filters?.parentalParam(ParentalGuideCategory.Nudity),
+            parentalViolence = filters?.parentalParam(ParentalGuideCategory.Violence),
+            parentalProfanity = filters?.parentalParam(ParentalGuideCategory.Profanity),
+            parentalAlcohol = filters?.parentalParam(ParentalGuideCategory.Alcohol),
+            parentalFrightening = filters?.parentalParam(ParentalGuideCategory.Frightening),
+            ignoreWatched = filters?.hideWatched,
+            ignoreWatchlisted = filters?.hideWatchlist,
+            ignoreCollected = false,
+        )
+        return response.body()
+    }
+
+    suspend fun getMediaListItems(
+        listId: TraktId,
+        extended: String?,
+        sorting: Sorting,
+        pagination: Pagination,
+        filters: GlobalFilter?,
+    ): List<ListMediaItemDto> {
+        val response = listsApi.getListsItemsMedia(
+            id = listId.value.toString(),
+            extended = extended,
+            watchnow = filters?.availability?.joinToString(",") { it.slug },
+            genres = filters?.genresParam,
+            subgenres = filters?.subgenre?.joinToString(","),
+            years = filters?.years?.let { "${it.first}-${it.second}" },
+            ratings = filters?.rating?.let { "${it.first}-${it.second}" },
+            startDate = null,
+            endDate = null,
+            page = pagination.page,
+            limit = pagination.limit.toString(),
+            sortBy = sorting.type.value,
+            sortHow = sorting.order.value,
+            runtimes = filters?.runtime?.let { "${it.first}-${it.second}" },
+            countries = filters?.countriesParam,
+            statuses = filters?.statusesParam,
+            certifications = filters?.certificationsParam,
+            parentalNudity = filters?.parentalParam(ParentalGuideCategory.Nudity),
+            parentalViolence = filters?.parentalParam(ParentalGuideCategory.Violence),
+            parentalProfanity = filters?.parentalParam(ParentalGuideCategory.Profanity),
+            parentalAlcohol = filters?.parentalParam(ParentalGuideCategory.Alcohol),
+            parentalFrightening = filters?.parentalParam(ParentalGuideCategory.Frightening),
+            ignoreWatched = filters?.hideWatched,
+            ignoreWatchlisted = filters?.hideWatchlist,
+            ignoreCollected = false,
+        )
+        return response.body()
+    }
+
+    suspend fun getShowListItems(
+        listId: TraktId,
+        extended: String?,
+        sorting: Sorting,
+        pagination: Pagination,
+        filters: GlobalFilter?,
+    ): List<ListShowItemDto> {
+        val response = listsApi.getListsItemsShow(
+            id = listId.value.toString(),
+            extended = extended,
+            watchnow = filters?.availability?.joinToString(",") { it.slug },
+            genres = filters?.genresParam,
+            subgenres = filters?.subgenre?.joinToString(","),
+            years = filters?.years?.let { "${it.first}-${it.second}" },
+            ratings = filters?.rating?.let { "${it.first}-${it.second}" },
+            startDate = null,
+            endDate = null,
+            page = pagination.page,
+            limit = pagination.limit.toString(),
+            sortBy = sorting.type.value,
+            sortHow = sorting.order.value,
+            runtimes = filters?.runtime?.let { "${it.first}-${it.second}" },
+            countries = filters?.countriesParam,
+            statuses = filters?.statusesParam,
+            certifications = filters?.certificationsParam,
+            parentalNudity = filters?.parentalParam(ParentalGuideCategory.Nudity),
+            parentalViolence = filters?.parentalParam(ParentalGuideCategory.Violence),
+            parentalProfanity = filters?.parentalParam(ParentalGuideCategory.Profanity),
+            parentalAlcohol = filters?.parentalParam(ParentalGuideCategory.Alcohol),
+            parentalFrightening = filters?.parentalParam(ParentalGuideCategory.Frightening),
+            ignoreWatched = filters?.hideWatched,
+            ignoreWatchlisted = filters?.hideWatchlist,
+            ignoreCollected = false,
+        )
+        return response.body()
+    }
+
+    suspend fun getMovieListItems(
+        listId: TraktId,
+        extended: String?,
+        sorting: Sorting,
+        pagination: Pagination,
+        filters: GlobalFilter?,
+    ): List<ListMovieItemDto> {
+        val response = listsApi.getListsItemsMovie(
+            id = listId.value.toString(),
+            extended = extended,
+            watchnow = filters?.availability?.joinToString(",") { it.slug },
+            genres = filters?.genresParam,
+            years = filters?.years?.let { "${it.first}-${it.second}" },
+            ratings = filters?.rating?.let { "${it.first}-${it.second}" },
+            startDate = null,
+            endDate = null,
+            subgenres = filters?.subgenre?.joinToString(","),
+            page = pagination.page,
+            limit = pagination.limit.toString(),
+            sortBy = sorting.type.value,
+            sortHow = sorting.order.value,
+            runtimes = filters?.runtime?.let { "${it.first}-${it.second}" },
+            countries = filters?.countriesParam,
+            statuses = filters?.statusesParam,
+            certifications = filters?.certificationsParam,
+            parentalNudity = filters?.parentalParam(ParentalGuideCategory.Nudity),
+            parentalViolence = filters?.parentalParam(ParentalGuideCategory.Violence),
+            parentalProfanity = filters?.parentalParam(ParentalGuideCategory.Profanity),
+            parentalAlcohol = filters?.parentalParam(ParentalGuideCategory.Alcohol),
+            parentalFrightening = filters?.parentalParam(ParentalGuideCategory.Frightening),
+            ignoreWatched = filters?.hideWatched,
+            ignoreWatchlisted = filters?.hideWatchlist,
+            ignoreCollected = false,
+        )
+        return response.body()
+    }
+
+    suspend fun addLikedList(listId: TraktId) {
+        listsApi.postListsLike(
+            id = listId.value.toString(),
+            body = null,
+        )
+        cacheMarker.invalidate()
+    }
+
+    suspend fun removeLikedList(listId: TraktId) {
+        listsApi.deleteListsUnlike(
+            id = listId.value.toString(),
+        )
+        cacheMarker.invalidate()
+    }
+
+    suspend fun reorderListItems(
+        listId: TraktId,
+        itemsIds: List<Int>,
+    ) {
+        listsApi.postUsersListsListReorderItems(
+            id = "me",
+            listId = listId.value.toString(),
+            postUsersListsReorderRequest = PostUsersListsReorderRequest(
+                rank = itemsIds,
+            ),
+        )
+        cacheMarker.invalidate()
+    }
+
+    suspend fun reorderLists(listsIds: List<TraktId>) {
+        listsApi.postUsersListsReorder(
+            id = "me",
+            postUsersListsReorderRequest = PostUsersListsReorderRequest(
+                rank = listsIds.map { it.value },
+            ),
+        )
+        cacheMarker.invalidate()
+    }
+}

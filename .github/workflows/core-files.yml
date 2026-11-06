@@ -1,0 +1,79 @@
+name: Core files
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build core-files.txt
+        run: |
+          set +e
+          C=common/src/main/java/tv/trakt/trakt/common
+          A=app/src/main/java/tv/trakt/trakt/core
+          section() { printf '\n\n===== %s =====\n' "$1"; }
+          show() {
+            if [ -f "$1" ]; then
+              printf '\n--- %s ---\n' "$1"
+              head -n "${2:-150}" "$1"
+            else
+              printf '\n--- %s (NOT FOUND) ---\n' "$1"
+            fi
+          }
+          {
+            section "PROJECT RULES"
+            show .agents/rules/networking.md 250
+            show .agents/rules/architecture.md 250
+            show .agents/rules/project.md 120
+
+            section "NETWORKING CORE"
+            show $C/networking/OpenApiAliases.kt 250
+            show $C/networking/client/KtorClientConfig.kt 150
+            show $C/networking/client/KtorClientFactory.kt 200
+            show $C/networking/di/NetworkingModule.kt 200
+            show $C/networking/api/v3/V3Api.kt 120
+            show $C/networking/helpers/OAuthErrors.kt 80
+
+            section "AUTH"
+            show $A/auth/ConfigAuth.kt 100
+            show $A/auth/Pkce.kt 80
+            show $C/data/request/TokenExchangeRequest.kt 60
+            show $C/data/remote/AuthRemoteSource.kt 120
+            for f in $(git ls-files $C/auth | grep '\.kt$' | head -20); do show "$f" 120; done
+
+            section "REMOTE SOURCES: DI"
+            show $C/data/remote/di/RemoteSourcesModule.kt 250
+
+            section "REMOTE SOURCES: KEY ONES"
+            for n in SearchRemoteSource MoviesRemoteSource ShowsRemoteSource UserWatchlistRemoteSource UserHistoryRemoteSource MoviesSyncRemoteSource ShowsSyncRemoteSource EpisodesSyncRemoteSource MediaRemoteSource UserRemoteSource UserCalendarRemoteSource UserRatingsRemoteSource; do
+              show $C/data/remote/$n.kt 140
+            done
+
+            section "REMOTE SOURCES: LINE COUNTS"
+            wc -l $C/data/remote/*.kt
+
+            section "ALL FILES IN common/src/main"
+            git ls-files common/src/main | grep '\.kt$' | head -500
+
+            section "COUPLING: files importing the generated client"
+            git grep -l "org.openapitools.client" -- '*.kt' | wc -l
+            git grep -l "org.openapitools.client" -- 'tv/*.kt' | wc -l
+
+            section "COUPLING: most-used generated models"
+            git grep -h "^import org.openapitools.client.models" -- '*.kt' | sort | uniq -c | sort -rn | head -80
+
+            section "COUPLING: most-used generated apis"
+            git grep -h "^import org.openapitools.client.apis" -- '*.kt' | sort | uniq -c | sort -rn | head -40
+          } > core-files.txt
+          wc -c core-files.txt
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add core-files.txt
+          git commit -m "Add core-files.txt" || echo "Nothing to commit"
+          git push

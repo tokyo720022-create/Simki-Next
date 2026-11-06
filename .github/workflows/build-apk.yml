@@ -1,0 +1,146 @@
+name: Build APK
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: build-apk
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Prepare local config (dummy values, enough to compile)
+        env:
+          SIMKL_CLIENT_ID: ${{ secrets.SIMKL_CLIENT_ID }}
+        run: |
+          # local.properties: one entry for every key the Gradle files read
+          KEYS=$(grep -rhoE 'getProperty\("[A-Z0-9_]+"' --include=*.kts . | sed -E 's/getProperty\("//; s/"//' | sort -u)
+          : > local.properties
+          for k in $KEYS; do
+            case "$k" in
+              *ENABLED*|*DEBUG*|*FLAG*) v='false' ;;
+              *) v='"dummy"' ;;
+            esac
+            echo "$k=$v" >> local.properties
+          done
+          if [ -n "$SIMKL_CLIENT_ID" ]; then
+            echo "SIMKL_CLIENT_ID=\"$SIMKL_CLIENT_ID\"" >> local.properties
+          fi
+          echo "--- local.properties keys ---"
+          cut -d= -f1 local.properties
+
+          # google-services.json: dummy Firebase config for both flavors
+          if [ ! -f app/google-services.json ]; then
+            cat > app/google-services.json <<'EOF'
+          {
+            "project_info": {
+              "project_number": "123456789012",
+              "project_id": "dummy-project",
+              "storage_bucket": "dummy-project.appspot.com"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:123456789012:android:0123456789abcdef",
+                  "android_client_info": { "package_name": "tv.trakt.trakt" }
+                },
+                "oauth_client": [],
+                "api_key": [{ "current_key": "dummy-api-key" }],
+                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+              },
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:123456789012:android:0123456789abcdee",
+                  "android_client_info": { "package_name": "tv.trakt.trakt.v3" }
+                },
+                "oauth_client": [],
+                "api_key": [{ "current_key": "dummy-api-key" }],
+                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          EOF
+          fi
+          chmod +x gradlew
+
+      - name: Build debug APK
+        run: |
+          set -o pipefail
+          ./gradlew :app:assemblePlaystoreDebug -PabiFilters=arm64-v8a --console=plain 2>&1 | tee build.log
+
+      - name: Write build report
+        if: always()
+        run: |
+          {
+            echo "status: ${{ job.status }}"
+            echo "run: ${{ github.run_number }}"
+            echo
+            echo "=== errors ==="
+            grep -nE "^e: |error:|\* What went wrong|Execution failed|FAILURE" -A4 build.log | head -300
+            echo
+            echo "=== log tail ==="
+            tail -n 80 build.log
+            echo
+            echo "=== common/build.gradle.kts ==="
+            head -150 common/build.gradle.kts
+            echo
+            echo "=== resources/build.gradle.kts ==="
+            head -80 resources/build.gradle.kts
+          } > build-report.txt
+
+      - name: Dump generated DTOs
+        if: always()
+        run: |
+          DIR=$(find . -type d -path "*generate-resources*/org/openapitools/client/models" | head -1)
+          if [ -z "$DIR" ]; then
+            echo "generated models folder not found" > dto-dump.txt
+            exit 0
+          fi
+          : > dto-dump.txt
+          for n in \
+            GetCalendarsMedia200ResponseInnerMovie GetCalendarsMedia200ResponseInnerShow GetCalendarsMedia200ResponseInnerEpisode \
+            GetCalendarsMovies200ResponseInnerMovieIds GetCalendarsShows200ResponseInnerShowIds GetCalendarsShows200ResponseInnerEpisodeIds \
+            GetCalendarsShows200ResponseInnerShowImages GetCalendarsShows200ResponseInner GetCalendarsMovies200ResponseInner \
+            GetUsersWatchlistAll200ResponseInner GetUsersWatchlistMovies200ResponseInner GetUsersWatchlistShows200ResponseInner \
+            GetUsersHistoryAll200ResponseInner GetSearchQuery200ResponseInner GetSearchTrending200ResponseInner \
+            GetMediaTrending200ResponseInner GetMediaPopular200ResponseInner GetSyncProgressUpNextStandard200ResponseInner \
+            GetSyncProgressMovies200ResponseInner GetUsersSettings200Response GetShowsSeasons200ResponseInner \
+            GetUsersRatingsMovies200ResponseInner GetMoviesRatings200Response PostSyncHistoryAdd200Response; do
+            f="$DIR/$n.kt"
+            printf '\n--- %s ---\n' "$n" >> dto-dump.txt
+            if [ -f "$f" ]; then grep -vE '^\s*(\*|/\*)' "$f" | head -120 >> dto-dump.txt; else echo "(not found)" >> dto-dump.txt; fi
+          done
+
+      - name: Commit report
+        if: always()
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -f build-report.txt dto-dump.txt
+          git commit -m "Build report" || echo "Nothing to commit"
+          git pull --rebase || true
+          git push || true
+
+      - name: Publish APK
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK=$(find app/build/outputs/apk -name "*.apk" | head -1)
+          cp "$APK" "SimkiNext-debug-${{ github.run_number }}.apk"
+          gh release create "build-${{ github.run_number }}" "SimkiNext-debug-${{ github.run_number }}.apk" \
+            --title "Build ${{ github.run_number }}" --notes "Debug APK" --prerelease

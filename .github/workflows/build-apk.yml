@@ -18,7 +18,12 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - uses: android-actions/setup-android@v3
+      - name: Accept Android SDK licenses (SDK is preinstalled on the runner)
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKM=$(find "$SDK" -name sdkmanager -type f 2>/dev/null | head -1)
+          echo "sdkmanager: $SDKM"
+          yes | "$SDKM" --licenses > /dev/null || true
 
       - uses: gradle/actions/setup-gradle@v4
 
@@ -85,6 +90,8 @@ jobs:
       - name: Write build report
         if: always()
         run: |
+          set +e
+          touch build.log
           {
             echo "status: ${{ job.status }}"
             echo "run: ${{ github.run_number }}"
@@ -100,7 +107,8 @@ jobs:
             echo
             echo "=== resources/build.gradle.kts ==="
             head -80 resources/build.gradle.kts
-          } > build-report.txt
+          } > build-report.txt 2>&1
+          true
 
       - name: Dump generated DTOs
         if: always()

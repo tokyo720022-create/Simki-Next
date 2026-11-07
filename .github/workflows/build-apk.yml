@@ -85,7 +85,9 @@ jobs:
       - name: Build debug APK
         run: |
           set -o pipefail
-          ./gradlew :app:assemblePlaystoreDebug -PabiFilters=arm64-v8a --console=plain 2>&1 | tee build.log
+          # the API client is generated into build/generate-resources and is not checked in
+          ./gradlew openApiGenerate --console=plain 2>&1 | tee build.log
+          ./gradlew :app:assemblePlaystoreDebug -PabiFilters=arm64-v8a --console=plain 2>&1 | tee -a build.log
 
       - name: Write build report
         if: always()

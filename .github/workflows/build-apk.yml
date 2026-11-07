@@ -99,6 +99,19 @@ jobs:
             echo "=== errors ==="
             grep -nE "^e: |error:|\* What went wrong|Execution failed|FAILURE" -A4 build.log | head -300
             echo
+            echo "=== every error line (all files) ==="
+            grep -nE "Location: |Unresolved reference|Type mismatch|Cannot find|None of the following|Overload resolution|Too many arguments|No value passed|Argument type mismatch" build.log | head -250
+            echo
+            echo "=== source around each error ==="
+            grep -oE "Location: [^ ]+\.kt line [0-9]+" build.log | sort -u | head -40 | while read -r _ f _ n; do
+              echo "--- $f:$n"
+              sed -n "$((n>8?n-8:1)),$((n+8))p" "$f"
+            done
+            grep -oE "^e: (file://)?[^ ]+\.kt:[0-9]+" build.log | sed -E 's#^e: (file://)?##' | sort -u | head -40 | while IFS=: read -r f n; do
+              echo "--- $f:$n"
+              sed -n "$((n>8?n-8:1)),$((n+8))p" "$f"
+            done
+            echo
             echo "=== log tail ==="
             tail -n 80 build.log
             echo

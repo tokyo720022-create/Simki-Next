@@ -1,1 +1,1609 @@
-generated models folder not found
+
+--- GetCalendarsMedia200ResponseInnerMovie ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsMovies200ResponseInnerMovieIds
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerShowColors
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerShowImages
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerShowSocialIds
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetCalendarsMedia200ResponseInnerMovie (
+
+    @SerialName(value = "title")
+    val title: kotlin.String,
+
+    @SerialName(value = "ids")
+    val ids: GetCalendarsMovies200ResponseInnerMovieIds,
+
+    @SerialName(value = "year")
+    val year: kotlin.Int? = null,
+
+    @SerialName(value = "images")
+    val images: GetCalendarsShows200ResponseInnerShowImages? = null,
+
+    @SerialName(value = "tagline")
+    val tagline: kotlin.String? = null,
+
+    @SerialName(value = "overview")
+    val overview: kotlin.String? = null,
+
+    @SerialName(value = "released")
+    val released: kotlin.String? = null,
+
+    @SerialName(value = "runtime")
+    val runtime: kotlin.Int? = null,
+
+    @SerialName(value = "country")
+    val country: kotlin.String? = null,
+
+    @SerialName(value = "status")
+    val status: kotlin.String? = null,
+
+    @SerialName(value = "rating")
+    val rating: kotlin.Float? = null,
+
+    @SerialName(value = "votes")
+    val votes: kotlin.Int? = null,
+
+    @SerialName(value = "comment_count")
+    val commentCount: kotlin.Int? = null,
+
+    @SerialName(value = "trailer")
+    val trailer: kotlin.String? = null,
+
+    @SerialName(value = "homepage")
+    val homepage: kotlin.String? = null,
+
+    @SerialName(value = "updated_at")
+    val updatedAt: kotlin.String? = null,
+
+    @SerialName(value = "language")
+    val language: kotlin.String? = null,
+
+    @SerialName(value = "languages")
+    val languages: kotlin.collections.List<kotlin.String>? = null,
+
+    @SerialName(value = "available_translations")
+    val availableTranslations: kotlin.collections.List<kotlin.String>? = null,
+
+    @SerialName(value = "genres")
+    val genres: kotlin.collections.List<kotlin.String>? = null,
+
+    @SerialName(value = "subgenres")
+    val subgenres: kotlin.collections.List<kotlin.String>? = null,
+
+    @SerialName(value = "certification")
+    val certification: kotlin.String? = null,
+
+    @SerialName(value = "original_title")
+    val originalTitle: kotlin.String? = null,
+
+    @SerialName(value = "after_credits")
+    val afterCredits: kotlin.Boolean? = null,
+
+    @SerialName(value = "during_credits")
+    val duringCredits: kotlin.Boolean? = null,
+
+    @SerialName(value = "colors")
+    val colors: GetCalendarsShows200ResponseInnerShowColors? = null,
+
+    @SerialName(value = "social_ids")
+    val socialIds: GetCalendarsShows200ResponseInnerShowSocialIds? = null
+
+) {
+
+
+}
+
+
+--- GetCalendarsMedia200ResponseInnerShow ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerShowAirs
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerShowColors
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerShowIds
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerShowImages
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerShowSocialIds
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetCalendarsMedia200ResponseInnerShow (
+
+    @SerialName(value = "title")
+    val title: kotlin.String,
+
+    @SerialName(value = "ids")
+    val ids: GetCalendarsShows200ResponseInnerShowIds,
+
+    @SerialName(value = "year")
+    val year: kotlin.Int? = null,
+
+    @SerialName(value = "images")
+    val images: GetCalendarsShows200ResponseInnerShowImages? = null,
+
+    @SerialName(value = "aired_episodes")
+    val airedEpisodes: kotlin.Int? = null,
+
+    @SerialName(value = "tagline")
+    val tagline: kotlin.String? = null,
+
+    @SerialName(value = "overview")
+    val overview: kotlin.String? = null,
+
+    @SerialName(value = "first_aired")
+    val firstAired: kotlin.String? = null,
+
+    @SerialName(value = "last_aired")
+    val lastAired: kotlin.String? = null,
+
+    @SerialName(value = "airs")
+    val airs: GetCalendarsShows200ResponseInnerShowAirs? = null,
+
+    @SerialName(value = "runtime")
+    val runtime: kotlin.Int? = null,
+
+    @SerialName(value = "total_runtime")
+    val totalRuntime: kotlin.Int? = null,
+
+    @SerialName(value = "certification")
+    val certification: kotlin.String? = null,
+
+    @SerialName(value = "network")
+    val network: kotlin.String? = null,
+
+    @SerialName(value = "country")
+    val country: kotlin.String? = null,
+
+    @SerialName(value = "status")
+    val status: kotlin.String? = null,
+
+    @SerialName(value = "ending")
+    val ending: kotlin.String? = null,
+
+    @SerialName(value = "rating")
+    val rating: kotlin.Float? = null,
+
+    @SerialName(value = "votes")
+    val votes: kotlin.Int? = null,
+
+    @SerialName(value = "comment_count")
+    val commentCount: kotlin.Int? = null,
+
+    @SerialName(value = "trailer")
+    val trailer: kotlin.String? = null,
+
+    @SerialName(value = "homepage")
+    val homepage: kotlin.String? = null,
+
+    @SerialName(value = "updated_at")
+    val updatedAt: kotlin.String? = null,
+
+    @SerialName(value = "language")
+    val language: kotlin.String? = null,
+
+    @SerialName(value = "languages")
+    val languages: kotlin.collections.List<kotlin.String>? = null,
+
+    @SerialName(value = "available_translations")
+    val availableTranslations: kotlin.collections.List<kotlin.String>? = null,
+
+    @SerialName(value = "genres")
+    val genres: kotlin.collections.List<kotlin.String>? = null,
+
+    @SerialName(value = "subgenres")
+    val subgenres: kotlin.collections.List<kotlin.String>? = null,
+
+    @SerialName(value = "original_title")
+    val originalTitle: kotlin.String? = null,
+
+    @SerialName(value = "colors")
+
+--- GetCalendarsMedia200ResponseInnerEpisode ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerEpisodeEpisodesInner
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerEpisodeIds
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerEpisodeImages
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetCalendarsMedia200ResponseInnerEpisode (
+
+    @SerialName(value = "season")
+    val season: kotlin.Int,
+
+    @SerialName(value = "number")
+    val number: kotlin.Int,
+
+    @SerialName(value = "ids")
+    val ids: GetCalendarsShows200ResponseInnerEpisodeIds,
+
+    @SerialName(value = "title")
+    val title: kotlin.String? = null,
+
+    @SerialName(value = "first_aired")
+    val firstAired: kotlin.String? = null,
+
+    @SerialName(value = "released")
+    val released: kotlin.String? = null,
+
+    @SerialName(value = "effective_release_date")
+    val effectiveReleaseDate: kotlin.String? = null,
+
+    @SerialName(value = "number_abs")
+    val numberAbs: kotlin.Int? = null,
+
+    @SerialName(value = "rating")
+    val rating: kotlin.Float? = null,
+
+    @SerialName(value = "votes")
+    val votes: kotlin.Int? = null,
+
+    @SerialName(value = "comment_count")
+    val commentCount: kotlin.Int? = null,
+
+    @SerialName(value = "updated_at")
+    val updatedAt: kotlin.String? = null,
+
+    @SerialName(value = "available_translations")
+    val availableTranslations: kotlin.collections.List<kotlin.String>? = null,
+
+    @SerialName(value = "runtime")
+    val runtime: kotlin.Int? = null,
+
+    @SerialName(value = "overview")
+    val overview: kotlin.String? = null,
+
+    @SerialName(value = "episode_type")
+    val episodeType: GetCalendarsMedia200ResponseInnerEpisode.EpisodeType? = null,
+
+    @SerialName(value = "original_title")
+    val originalTitle: kotlin.String? = null,
+
+    @SerialName(value = "after_credits")
+    val afterCredits: kotlin.Boolean? = null,
+
+    @SerialName(value = "during_credits")
+    val duringCredits: kotlin.Boolean? = null,
+
+    @SerialName(value = "images")
+    val images: GetCalendarsShows200ResponseInnerEpisodeImages? = null,
+
+    @SerialName(value = "episodes")
+    val episodes: kotlin.collections.List<GetCalendarsShows200ResponseInnerEpisodeEpisodesInner>? = null
+
+) {
+
+    @Serializable
+    enum class EpisodeType(val value: kotlin.String) {
+        @SerialName(value = "standard") STANDARD("standard"),
+        @SerialName(value = "series_premiere") SERIES_PREMIERE("series_premiere"),
+        @SerialName(value = "season_premiere") SEASON_PREMIERE("season_premiere"),
+        @SerialName(value = "mid_season_finale") MID_SEASON_FINALE("mid_season_finale"),
+        @SerialName(value = "mid_season_premiere") MID_SEASON_PREMIERE("mid_season_premiere"),
+        @SerialName(value = "season_finale") SEASON_FINALE("season_finale"),
+        @SerialName(value = "series_finale") SERIES_FINALE("series_finale"),
+        @SerialName(value = "full_season") FULL_SEASON("full_season"),
+        @SerialName(value = "multiple_episodes") MULTIPLE_EPISODES("multiple_episodes");
+    }
+
+}
+
+
+--- GetCalendarsMovies200ResponseInnerMovieIds ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerEpisodeIdsPlex
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetCalendarsMovies200ResponseInnerMovieIds (
+
+    @SerialName(value = "trakt")
+    val trakt: kotlin.Int,
+
+    @SerialName(value = "slug")
+    val slug: kotlin.String,
+
+    @SerialName(value = "imdb")
+    val imdb: kotlin.String? = null,
+
+    @SerialName(value = "tmdb")
+    val tmdb: kotlin.Int? = null,
+
+    @SerialName(value = "plex")
+    val plex: GetCalendarsShows200ResponseInnerEpisodeIdsPlex? = null
+
+) {
+
+
+}
+
+
+--- GetCalendarsShows200ResponseInnerShowIds ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerEpisodeIdsPlex
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetCalendarsShows200ResponseInnerShowIds (
+
+    @SerialName(value = "trakt")
+    val trakt: kotlin.Int,
+
+    @SerialName(value = "slug")
+    val slug: kotlin.String,
+
+    @SerialName(value = "tvdb")
+    val tvdb: kotlin.Int? = null,
+
+    @SerialName(value = "imdb")
+    val imdb: kotlin.String? = null,
+
+    @SerialName(value = "tmdb")
+    val tmdb: kotlin.Int? = null,
+
+    @SerialName(value = "plex")
+    val plex: GetCalendarsShows200ResponseInnerEpisodeIdsPlex? = null
+
+) {
+
+
+}
+
+
+--- GetCalendarsShows200ResponseInnerEpisodeIds ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerEpisodeIdsPlex
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetCalendarsShows200ResponseInnerEpisodeIds (
+
+    @SerialName(value = "trakt")
+    val trakt: kotlin.Int,
+
+    @SerialName(value = "tvdb")
+    val tvdb: kotlin.Int? = null,
+
+    @SerialName(value = "imdb")
+    val imdb: kotlin.String? = null,
+
+    @SerialName(value = "tmdb")
+    val tmdb: kotlin.Int? = null,
+
+    @SerialName(value = "plex")
+    val plex: GetCalendarsShows200ResponseInnerEpisodeIdsPlex? = null
+
+) {
+
+
+}
+
+
+--- GetCalendarsShows200ResponseInnerShowImages ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetCalendarsShows200ResponseInnerShowImages (
+
+    @SerialName(value = "fanart")
+    val fanart: kotlin.collections.List<kotlin.String>,
+
+    @SerialName(value = "poster")
+    val poster: kotlin.collections.List<kotlin.String>,
+
+    @SerialName(value = "logo")
+    val logo: kotlin.collections.List<kotlin.String>,
+
+    @SerialName(value = "clearart")
+    val clearart: kotlin.collections.List<kotlin.String>,
+
+    @SerialName(value = "banner")
+    val banner: kotlin.collections.List<kotlin.String>,
+
+    @SerialName(value = "thumb")
+    val thumb: kotlin.collections.List<kotlin.String>
+
+) {
+
+
+}
+
+
+--- GetCalendarsShows200ResponseInner ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerEpisode
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerShow
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetCalendarsShows200ResponseInner (
+
+    @SerialName(value = "first_aired")
+    val firstAired: kotlin.String,
+
+    @SerialName(value = "episode")
+    val episode: GetCalendarsShows200ResponseInnerEpisode,
+
+    @SerialName(value = "show")
+    val show: GetCalendarsShows200ResponseInnerShow
+
+) {
+
+
+}
+
+
+--- GetCalendarsMovies200ResponseInner ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsMovies200ResponseInnerMovie
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetCalendarsMovies200ResponseInner (
+
+    @SerialName(value = "released")
+    val released: kotlin.String,
+
+    @SerialName(value = "movie")
+    val movie: GetCalendarsMovies200ResponseInnerMovie
+
+) {
+
+
+}
+
+
+--- GetUsersWatchlistAll200ResponseInner ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsMedia200ResponseInnerMovie
+import org.openapitools.client.models.GetCalendarsMedia200ResponseInnerShow
+import org.openapitools.client.models.GetUsersWatchlistAll200ResponseInnerOneOf
+import org.openapitools.client.models.GetUsersWatchlistAll200ResponseInnerOneOf1
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetUsersWatchlistAll200ResponseInner (
+
+    @SerialName(value = "rank")
+    val rank: kotlin.Int,
+
+    @SerialName(value = "id")
+    val id: kotlin.Int,
+
+    @SerialName(value = "listed_at")
+    val listedAt: kotlin.String,
+
+    @SerialName(value = "type")
+    val type: GetUsersWatchlistAll200ResponseInner.Type,
+
+    @SerialName(value = "notes")
+    val notes: kotlin.String? = null,
+
+    @SerialName(value = "movie")
+    val movie: GetCalendarsMedia200ResponseInnerMovie? = null,
+
+    @SerialName(value = "show")
+    val show: GetCalendarsMedia200ResponseInnerShow? = null
+
+) {
+
+    @Serializable
+    enum class Type(val value: kotlin.String) {
+        @SerialName(value = "movie") MOVIE("movie"),
+        @SerialName(value = "show") SHOW("show");
+    }
+
+}
+
+
+--- GetUsersWatchlistMovies200ResponseInner ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsMovies200ResponseInnerMovie
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetUsersWatchlistMovies200ResponseInner (
+
+    @SerialName(value = "rank")
+    val rank: kotlin.Int,
+
+    @SerialName(value = "id")
+    val id: kotlin.Int,
+
+    @SerialName(value = "listed_at")
+    val listedAt: kotlin.String,
+
+    @SerialName(value = "type")
+    val type: GetUsersWatchlistMovies200ResponseInner.Type,
+
+    @SerialName(value = "movie")
+    val movie: GetCalendarsMovies200ResponseInnerMovie,
+
+    @SerialName(value = "notes")
+    val notes: kotlin.String? = null
+
+) {
+
+    @Serializable
+    enum class Type(val value: kotlin.String) {
+        @SerialName(value = "movie") MOVIE("movie");
+    }
+
+}
+
+
+--- GetUsersWatchlistShows200ResponseInner ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerShow
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetUsersWatchlistShows200ResponseInner (
+
+    @SerialName(value = "rank")
+    val rank: kotlin.Int,
+
+    @SerialName(value = "id")
+    val id: kotlin.Int,
+
+    @SerialName(value = "listed_at")
+    val listedAt: kotlin.String,
+
+    @SerialName(value = "type")
+    val type: GetUsersWatchlistShows200ResponseInner.Type,
+
+    @SerialName(value = "show")
+    val show: GetCalendarsShows200ResponseInnerShow,
+
+    @SerialName(value = "notes")
+    val notes: kotlin.String? = null
+
+) {
+
+    @Serializable
+    enum class Type(val value: kotlin.String) {
+        @SerialName(value = "show") SHOW("show");
+    }
+
+}
+
+
+--- GetUsersHistoryAll200ResponseInner ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsMedia200ResponseInnerMovie
+import org.openapitools.client.models.GetCalendarsMedia200ResponseInnerShow
+import org.openapitools.client.models.GetUsersHistoryAll200ResponseInnerOneOf
+import org.openapitools.client.models.GetUsersHistoryAll200ResponseInnerOneOf1
+import org.openapitools.client.models.GetUsersLikes200ResponseInnerOneOfAllOfOneOf2Episode
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetUsersHistoryAll200ResponseInner (
+
+    @SerialName(value = "id")
+    val id: kotlin.Long,
+
+    @SerialName(value = "watched_at")
+    val watchedAt: kotlin.String,
+
+    @SerialName(value = "action")
+    val action: GetUsersHistoryAll200ResponseInner.Action,
+
+    @SerialName(value = "type")
+    val type: GetUsersHistoryAll200ResponseInner.Type,
+
+    @SerialName(value = "episode")
+    val episode: GetUsersLikes200ResponseInnerOneOfAllOfOneOf2Episode? = null,
+
+    @SerialName(value = "show")
+    val show: GetCalendarsMedia200ResponseInnerShow? = null,
+
+    @SerialName(value = "movie")
+    val movie: GetCalendarsMedia200ResponseInnerMovie? = null
+
+) {
+
+    @Serializable
+    enum class Action(val value: kotlin.String) {
+        @SerialName(value = "scrobble") SCROBBLE("scrobble"),
+        @SerialName(value = "checkin") CHECKIN("checkin"),
+        @SerialName(value = "watch") WATCH("watch");
+    }
+    @Serializable
+    enum class Type(val value: kotlin.String) {
+        @SerialName(value = "episode") EPISODE("episode"),
+        @SerialName(value = "movie") MOVIE("movie");
+    }
+
+}
+
+
+--- GetSearchQuery200ResponseInner ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsMedia200ResponseInnerMovie
+import org.openapitools.client.models.GetCalendarsMedia200ResponseInnerShow
+import org.openapitools.client.models.GetSearchQuery200ResponseInnerList
+import org.openapitools.client.models.GetSearchQuery200ResponseInnerPerson
+import org.openapitools.client.models.GetUsersLikes200ResponseInnerOneOfAllOfOneOf2Episode
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetSearchQuery200ResponseInner (
+
+    @SerialName(value = "score")
+    val score: kotlin.Long,
+
+    @SerialName(value = "type")
+    val type: GetSearchQuery200ResponseInner.Type,
+
+    @SerialName(value = "movie")
+    val movie: GetCalendarsMedia200ResponseInnerMovie? = null,
+
+    @SerialName(value = "show")
+    val show: GetCalendarsMedia200ResponseInnerShow? = null,
+
+    @SerialName(value = "episode")
+    val episode: GetUsersLikes200ResponseInnerOneOfAllOfOneOf2Episode? = null,
+
+    @SerialName(value = "person")
+    val person: GetSearchQuery200ResponseInnerPerson? = null,
+
+    @SerialName(value = "list")
+    val list: GetSearchQuery200ResponseInnerList? = null
+
+) {
+
+    @Serializable
+    enum class Type(val value: kotlin.String) {
+        @SerialName(value = "movie") MOVIE("movie"),
+        @SerialName(value = "show") SHOW("show"),
+        @SerialName(value = "episode") EPISODE("episode"),
+        @SerialName(value = "person") PERSON("person"),
+        @SerialName(value = "list") LIST("list");
+    }
+
+}
+
+
+--- GetSearchTrending200ResponseInner ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsMedia200ResponseInnerMovie
+import org.openapitools.client.models.GetCalendarsMedia200ResponseInnerShow
+import org.openapitools.client.models.GetSearchQuery200ResponseInnerPerson
+import org.openapitools.client.models.GetSearchTrending200ResponseInnerOneOf
+import org.openapitools.client.models.GetSearchTrending200ResponseInnerOneOf1
+import org.openapitools.client.models.GetSearchTrending200ResponseInnerOneOf2
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetSearchTrending200ResponseInner (
+
+    @SerialName(value = "id")
+    val id: kotlin.Long,
+
+    @SerialName(value = "count")
+    val count: kotlin.Int,
+
+    @SerialName(value = "type")
+    val type: GetSearchTrending200ResponseInner.Type,
+
+    @SerialName(value = "movie")
+    val movie: GetCalendarsMedia200ResponseInnerMovie? = null,
+
+    @SerialName(value = "show")
+    val show: GetCalendarsMedia200ResponseInnerShow? = null,
+
+    @SerialName(value = "person")
+    val person: GetSearchQuery200ResponseInnerPerson? = null
+
+) {
+
+    @Serializable
+    enum class Type(val value: kotlin.String) {
+        @SerialName(value = "movie") MOVIE("movie"),
+        @SerialName(value = "show") SHOW("show"),
+        @SerialName(value = "person") PERSON("person");
+    }
+
+}
+
+
+--- GetMediaTrending200ResponseInner ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsMedia200ResponseInnerMovie
+import org.openapitools.client.models.GetCalendarsMedia200ResponseInnerShow
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetMediaTrending200ResponseInner (
+
+    @SerialName(value = "watchers")
+    val watchers: kotlin.Int,
+
+    @SerialName(value = "movie")
+    val movie: GetCalendarsMedia200ResponseInnerMovie? = null,
+
+    @SerialName(value = "show")
+    val show: GetCalendarsMedia200ResponseInnerShow? = null
+
+) {
+
+
+}
+
+
+--- GetMediaPopular200ResponseInner ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsMovies200ResponseInnerMovie
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerShow
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerShowAirs
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerShowColors
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerShowIds
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerShowImages
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerShowSocialIds
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetMediaPopular200ResponseInner (
+
+    @SerialName(value = "title")
+    val title: kotlin.String,
+
+    @SerialName(value = "ids")
+    val ids: GetCalendarsShows200ResponseInnerShowIds,
+
+    @SerialName(value = "year")
+    val year: kotlin.Int? = null,
+
+    @SerialName(value = "images")
+    val images: GetCalendarsShows200ResponseInnerShowImages? = null,
+
+    @SerialName(value = "tagline")
+    val tagline: kotlin.String? = null,
+
+    @SerialName(value = "overview")
+    val overview: kotlin.String? = null,
+
+    @SerialName(value = "released")
+    val released: kotlin.String? = null,
+
+    @SerialName(value = "runtime")
+    val runtime: kotlin.Int? = null,
+
+    @SerialName(value = "country")
+    val country: kotlin.String? = null,
+
+    @SerialName(value = "status")
+    val status: kotlin.String? = null,
+
+    @SerialName(value = "rating")
+    val rating: kotlin.Float? = null,
+
+    @SerialName(value = "votes")
+    val votes: kotlin.Int? = null,
+
+    @SerialName(value = "comment_count")
+    val commentCount: kotlin.Int? = null,
+
+    @SerialName(value = "trailer")
+    val trailer: kotlin.String? = null,
+
+    @SerialName(value = "homepage")
+    val homepage: kotlin.String? = null,
+
+    @SerialName(value = "updated_at")
+    val updatedAt: kotlin.String? = null,
+
+    @SerialName(value = "language")
+    val language: kotlin.String? = null,
+
+    @SerialName(value = "languages")
+    val languages: kotlin.collections.List<kotlin.String>? = null,
+
+    @SerialName(value = "available_translations")
+    val availableTranslations: kotlin.collections.List<kotlin.String>? = null,
+
+    @SerialName(value = "genres")
+    val genres: kotlin.collections.List<kotlin.String>? = null,
+
+    @SerialName(value = "subgenres")
+    val subgenres: kotlin.collections.List<kotlin.String>? = null,
+
+    @SerialName(value = "certification")
+    val certification: kotlin.String? = null,
+
+    @SerialName(value = "original_title")
+    val originalTitle: kotlin.String? = null,
+
+    @SerialName(value = "after_credits")
+    val afterCredits: kotlin.Boolean? = null,
+
+    @SerialName(value = "during_credits")
+    val duringCredits: kotlin.Boolean? = null,
+
+    @SerialName(value = "colors")
+    val colors: GetCalendarsShows200ResponseInnerShowColors? = null,
+
+    @SerialName(value = "social_ids")
+    val socialIds: GetCalendarsShows200ResponseInnerShowSocialIds? = null,
+
+    @SerialName(value = "aired_episodes")
+    val airedEpisodes: kotlin.Int? = null,
+
+    @SerialName(value = "first_aired")
+    val firstAired: kotlin.String? = null,
+
+--- GetSyncProgressUpNextStandard200ResponseInner ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsShows200ResponseInnerShow
+import org.openapitools.client.models.GetSyncProgressUpNextStandard200ResponseInnerProgress
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetSyncProgressUpNextStandard200ResponseInner (
+
+    @SerialName(value = "show")
+    val show: GetCalendarsShows200ResponseInnerShow,
+
+    @SerialName(value = "progress")
+    val progress: GetSyncProgressUpNextStandard200ResponseInnerProgress
+
+) {
+
+
+}
+
+
+--- GetSyncProgressMovies200ResponseInner ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsMovies200ResponseInnerMovie
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetSyncProgressMovies200ResponseInner (
+
+    @SerialName(value = "progress")
+    val progress: kotlin.Float,
+
+    @SerialName(value = "paused_at")
+    val pausedAt: kotlin.String,
+
+    @SerialName(value = "id")
+    val id: kotlin.Long,
+
+    @SerialName(value = "type")
+    val type: GetSyncProgressMovies200ResponseInner.Type,
+
+    @SerialName(value = "movie")
+    val movie: GetCalendarsMovies200ResponseInnerMovie
+
+) {
+
+    @Serializable
+    enum class Type(val value: kotlin.String) {
+        @SerialName(value = "movie") MOVIE("movie");
+    }
+
+}
+
+
+--- GetUsersSettings200Response ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetUsersSettings200ResponseAccount
+import org.openapitools.client.models.GetUsersSettings200ResponseBrowsing
+import org.openapitools.client.models.GetUsersSettings200ResponseConnections
+import org.openapitools.client.models.GetUsersSettings200ResponseLimits
+import org.openapitools.client.models.GetUsersSettings200ResponsePermissions
+import org.openapitools.client.models.GetUsersSettings200ResponseSharingText
+import org.openapitools.client.models.GetUsersSettings200ResponseUser
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetUsersSettings200Response (
+
+    @SerialName(value = "user")
+    val user: GetUsersSettings200ResponseUser,
+
+    @SerialName(value = "permissions")
+    val permissions: GetUsersSettings200ResponsePermissions,
+
+    @SerialName(value = "account")
+    val account: GetUsersSettings200ResponseAccount,
+
+    @SerialName(value = "browsing")
+    val browsing: GetUsersSettings200ResponseBrowsing? = null,
+
+    @SerialName(value = "connections")
+    val connections: GetUsersSettings200ResponseConnections? = null,
+
+    @SerialName(value = "sharing_text")
+    val sharingText: GetUsersSettings200ResponseSharingText? = null,
+
+    @SerialName(value = "limits")
+    val limits: GetUsersSettings200ResponseLimits? = null
+
+) {
+
+
+}
+
+
+--- GetShowsSeasons200ResponseInner ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetUsersLikes200ResponseInnerOneOfAllOfOneOf3SeasonIds
+import org.openapitools.client.models.GetUsersLikes200ResponseInnerOneOfAllOfOneOf3SeasonImages
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetShowsSeasons200ResponseInner (
+
+    @SerialName(value = "number")
+    val number: kotlin.Int,
+
+    @SerialName(value = "ids")
+    val ids: GetUsersLikes200ResponseInnerOneOfAllOfOneOf3SeasonIds,
+
+    @SerialName(value = "aired_episodes")
+    val airedEpisodes: kotlin.Int? = null,
+
+    @SerialName(value = "rating")
+    val rating: kotlin.Float? = null,
+
+    @SerialName(value = "votes")
+    val votes: kotlin.Int? = null,
+
+    @SerialName(value = "episode_count")
+    val episodeCount: kotlin.Int? = null,
+
+    @SerialName(value = "title")
+    val title: kotlin.String? = null,
+
+    @SerialName(value = "overview")
+    val overview: kotlin.String? = null,
+
+    @SerialName(value = "first_aired")
+    val firstAired: kotlin.String? = null,
+
+    @SerialName(value = "updated_at")
+    val updatedAt: kotlin.String? = null,
+
+    @SerialName(value = "total_runtime")
+    val totalRuntime: kotlin.Int? = null,
+
+    @SerialName(value = "network")
+    val network: kotlin.String? = null,
+
+    @SerialName(value = "images")
+    val images: GetUsersLikes200ResponseInnerOneOfAllOfOneOf3SeasonImages? = null
+
+) {
+
+
+}
+
+
+--- GetUsersRatingsMovies200ResponseInner ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetCalendarsMedia200ResponseInnerMovie
+import org.openapitools.client.models.GetCalendarsMedia200ResponseInnerShow
+import org.openapitools.client.models.GetUsersLikes200ResponseInnerOneOfAllOfOneOf2Episode
+import org.openapitools.client.models.GetUsersRatingsMovies200ResponseInnerOneOf
+import org.openapitools.client.models.GetUsersRatingsMovies200ResponseInnerOneOf1
+import org.openapitools.client.models.GetUsersRatingsMovies200ResponseInnerOneOf2
+import org.openapitools.client.models.GetUsersRatingsMovies200ResponseInnerOneOf3
+import org.openapitools.client.models.GetUsersRatingsMovies200ResponseInnerOneOf3Season
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetUsersRatingsMovies200ResponseInner (
+
+    @SerialName(value = "rated_at")
+    val ratedAt: kotlin.String,
+
+    @SerialName(value = "rating")
+    val rating: kotlin.Int,
+
+    @SerialName(value = "type")
+    val type: GetUsersRatingsMovies200ResponseInner.Type,
+
+    @SerialName(value = "episode")
+    val episode: GetUsersLikes200ResponseInnerOneOfAllOfOneOf2Episode? = null,
+
+    @SerialName(value = "show")
+    val show: GetCalendarsMedia200ResponseInnerShow? = null,
+
+    @SerialName(value = "movie")
+    val movie: GetCalendarsMedia200ResponseInnerMovie? = null,
+
+    @SerialName(value = "season")
+    val season: GetUsersRatingsMovies200ResponseInnerOneOf3Season? = null
+
+) {
+
+    @Serializable
+    enum class Type(val value: kotlin.String) {
+        @SerialName(value = "episode") EPISODE("episode"),
+        @SerialName(value = "movie") MOVIE("movie"),
+        @SerialName(value = "show") SHOW("show"),
+        @SerialName(value = "season") SEASON("season");
+    }
+
+}
+
+
+--- GetMoviesRatings200Response ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.GetMoviesRatings200ResponseDistribution
+import org.openapitools.client.models.GetMoviesRatings200ResponseMetascore
+import org.openapitools.client.models.GetMoviesRatings200ResponseRottenTomatoes
+import org.openapitools.client.models.GetMoviesRatings200ResponseTmdb
+import org.openapitools.client.models.GetMoviesRatings200ResponseTrakt
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class GetMoviesRatings200Response (
+
+    @SerialName(value = "rating")
+    val rating: kotlin.Float? = null,
+
+    @SerialName(value = "votes")
+    val votes: kotlin.Int? = null,
+
+    @SerialName(value = "distribution")
+    val distribution: GetMoviesRatings200ResponseDistribution? = null,
+
+    @SerialName(value = "trakt")
+    val trakt: GetMoviesRatings200ResponseTrakt? = null,
+
+    @SerialName(value = "tmdb")
+    val tmdb: GetMoviesRatings200ResponseTmdb? = null,
+
+    @SerialName(value = "imdb")
+    val imdb: GetMoviesRatings200ResponseTmdb? = null,
+
+    @SerialName(value = "metascore")
+    val metascore: GetMoviesRatings200ResponseMetascore? = null,
+
+    @SerialName(value = "rotten_tomatoes")
+    val rottenTomatoes: GetMoviesRatings200ResponseRottenTomatoes? = null,
+
+    @SerialName(value = "letterboxd")
+    val letterboxd: GetMoviesRatings200ResponseTmdb? = null,
+
+    @SerialName(value = "mal")
+    val mal: GetMoviesRatings200ResponseTmdb? = null
+
+) {
+
+
+}
+
+
+--- PostSyncHistoryAdd200Response ---
+
+@file:Suppress(
+    "ArrayInDataClass",
+    "DuplicatedCode",
+    "EnumEntryName",
+    "RemoveRedundantQualifierName",
+    "RemoveRedundantCallsOfConversionMethods",
+    "REDUNDANT_CALL_OF_CONVERSION_METHOD",
+    "RedundantUnitReturnType",
+    "RemoveEmptyClassBody",
+    "UnnecessaryVariable",
+    "UnusedImport",
+    "UnnecessaryVariable",
+    "unused"
+)
+
+package org.openapitools.client.models
+
+import org.openapitools.client.models.PostUsersHiddenAddRequest
+import org.openapitools.client.models.PostUsersHiddenRemoveProgress200ResponseDeleted
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Contextual
+
+@Serializable
+
+data class PostSyncHistoryAdd200Response (
+
+    @SerialName(value = "added")
+    val added: PostUsersHiddenRemoveProgress200ResponseDeleted,
+
+    @SerialName(value = "updated")
+    val updated: PostUsersHiddenRemoveProgress200ResponseDeleted,
+
+    @SerialName(value = "not_found")
+    val notFound: PostUsersHiddenAddRequest
+
+) {
+
+
+}
+
